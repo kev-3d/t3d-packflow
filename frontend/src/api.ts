@@ -14,6 +14,26 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+const safeName = (orderNumber: string, id: number) => orderNumber.replace(/[^a-zA-Z0-9_-]/g, '') || String(id)
+
+/** Fetch a generated PDF and hand it to the browser as a download. */
+async function downloadPdf(url: string, filename: string, fallbackError: string) {
+  const response = await fetch(url)
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ detail: fallbackError }))
+    throw new Error(payload.detail || fallbackError)
+  }
+  const objectUrl = URL.createObjectURL(await response.blob())
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  // Allow the browser to start consuming the file before releasing the URL.
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+}
+
 export const api = {
   dashboard: () => request<DashboardData>('/dashboard'),
   orders: () => request<OrderSummary[]>('/orders'),
@@ -80,6 +100,11 @@ export const api = {
   },
   previewRecommendation: (id: number, sourceItemId: number, quantity: number, planId: number) =>
     request<RecommendationPreview>(`/orders/${id}/recommendations/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({source_item_id:sourceItemId,quantity,expected_plan_id:planId}) }),
+  packingListPdf: (id: number, orderNumber: string) =>
+    downloadPdf(`/api/orders/${id}/packing-list.pdf`, `packing-list-${safeName(orderNumber, id)}.pdf`, 'The packing list could not be generated.'),
+  boxLabelsPdf: (id: number, orderNumber: string, box?: number) =>
+    downloadPdf(`/api/orders/${id}/labels.pdf${box ? `?box=${box}` : ''}`,
+      `labels-${safeName(orderNumber, id)}${box ? `-box${box}` : ''}.pdf`, 'The box labels could not be generated.'),
   sourcePdf: async (id: number) => {
     const response = await fetch(`/api/orders/${id}/source.pdf`)
     if (!response.ok) throw new Error(response.status === 404 ? 'The original PDF is unavailable. Only PDFs uploaded after source retention was enabled can be viewed.' : 'The source PDF could not be opened. Try again.')

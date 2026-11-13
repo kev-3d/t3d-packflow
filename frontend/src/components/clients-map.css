@@ -1,0 +1,44 @@
+.clients-map { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 540px; border-top: 1px solid var(--line); }
+.clients-map__stage { position: relative; min-height: 540px; background: #F7F8F8; }
+.clients-map__canvas { position: absolute; inset: 0; background: #F2F5F5; font: inherit; }
+.clients-map__canvas .leaflet-control-zoom { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; box-shadow: none; }
+.clients-map__canvas .leaflet-control-zoom a { color: var(--text); width: 32px; height: 32px; line-height: 30px; }
+.clients-map__canvas .leaflet-tooltip { border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 12px #1717171a; color: var(--text); font-size: 12px; padding: 6px 9px; }
+.clients-map__canvas path.leaflet-interactive:focus { outline: none; }
+
+.clients-map__legend { position: absolute; left: 14px; bottom: 14px; z-index: 500; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: #FFFFFFE6; font-size: 11px; color: var(--muted); }
+.clients-map__legend > span { display: block; margin-bottom: 6px; font-weight: 600; }
+.clients-map__legend > div { display: flex; gap: 2px; }
+.clients-map__legend i { min-width: 38px; padding: 3px 0; text-align: center; font-style: normal; font-size: 10px; color: #171717; }
+.clients-map__legend i:nth-child(n+4) { color: #FFFFFF; }
+.clients-map__attribution { position: absolute; right: 10px; bottom: 6px; z-index: 500; margin: 0; font-size: 10px; color: var(--muted); }
+
+.clients-map__side { display: flex; flex-direction: column; min-height: 0; max-height: 540px; border-left: 1px solid var(--line); background: #FFFFFF; }
+.clients-map__summary { padding: 16px 18px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.clients-map__summary strong { color: var(--text); font-size: 15px; }
+.clients-map__summary span { display: block; margin-top: 4px; font-size: 12px; }
+
+.clients-map__ranking, .clients-map__detail ul { list-style: none; margin: 0; padding: 6px 8px 12px; overflow-y: auto; }
+.clients-map__ranking { flex: 1; }
+.clients-map__ranking button { position: relative; width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font-size: 13px; text-align: left; cursor: pointer; }
+.clients-map__ranking button:hover, .clients-map__ranking button:focus-visible { background: #F5F5F3; }
+.clients-map__ranking button:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.clients-map__ranking span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clients-map__ranking i { position: absolute; left: 10px; bottom: 3px; height: 2px; max-width: calc(100% - 20px); background: #8DBDB9; border-radius: 2px; }
+.clients-map__ranking b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--cyan); }
+
+.clients-map__detail { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.clients-map__back { align-self: flex-start; margin: 12px 14px 0; padding: 4px 6px; border: 0; background: transparent; color: var(--cyan); font-size: 12px; font-weight: 600; cursor: pointer; }
+.clients-map__detail h3 { display: flex; align-items: center; gap: 8px; margin: 8px 18px 6px; font-size: 16px; }
+.clients-map__detail h3 b { padding: 2px 7px; border-radius: 6px; background: #EDF2F2; color: var(--cyan); font-size: 12px; }
+.clients-map__detail li { padding: 8px 10px; border-bottom: 1px solid #F0F0EE; font-size: 13px; }
+.clients-map__detail li strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clients-map__detail li span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+.clients-map__empty, .clients-map__loading { padding: 18px; color: var(--muted); font-size: 13px; }
+
+@media (max-width: 900px) {
+  .clients-map { grid-template-columns: 1fr; }
+  .clients-map__stage { min-height: 380px; }
+  .clients-map__side { max-height: 360px; border-left: 0; border-top: 1px solid var(--line); }
+  .clients-map__legend i { min-width: 30px; }
+}

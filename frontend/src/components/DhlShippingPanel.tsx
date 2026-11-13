@@ -5,16 +5,28 @@ import { Input } from './ui/input'
 import { canAutoQuote, demandFor, formatMoney, fuelFor, initialInputs, numberOrNull, quotePayload, todayIso } from '../dhlShipping'
 import type { DetectedDestination, DhlConfig, SavedShippingQuote, ShippingQuoteInputs } from '../types'
 
+/** Summary of the panel's quote, for the "DHL rate" KPI card. */
+export interface DhlRateStatus {
+  state: 'loading' | 'calculating' | 'ready' | 'error' | 'incomplete'
+  total?: number
+  currency?: string
+  destination?: string
+  message?: string
+}
+
 interface Props {
   orderId: number
   planId: number | null
   orderCurrency: string
+  onStatus?: (status: DhlRateStatus) => void
 }
+
+export const DHL_PANEL_ID = 'dhl-shipping'
 
 const SOURCE_LABELS = { dhl: 'DHL published rate (auto)', manual: 'Manual override' } as const
 const AUTO_DELAY_MS = 450
 
-export function DhlShippingPanel({ orderId, planId, orderCurrency }: Props) {
+export function DhlShippingPanel({ orderId, planId, orderCurrency, onStatus }: Props) {
   const [config, setConfig] = useState<DhlConfig | null>(null)
   const [quote, setQuote] = useState<SavedShippingQuote | null>(null)
   const [stale, setStale] = useState(false)
@@ -62,6 +74,21 @@ export function DhlShippingPanel({ orderId, planId, orderCurrency }: Props) {
     return () => window.clearTimeout(timer)
   }, [config, inputs, orderId])
 
+  useEffect(() => {
+    if (!onStatus) return
+    if (loadError) return onStatus({ state: 'error', message: loadError })
+    if (!config || !inputs) return onStatus({ state: 'loading' })
+    if (busy) return onStatus({ state: 'calculating' })
+    if (error) return onStatus({ state: 'error', message: error })
+    if (!canAutoQuote(inputs, config)) {
+      return onStatus({ state: 'incomplete', message: inputs.destination ? 'Rate missing for this date' : 'Select a destination' })
+    }
+    const result = quote?.result
+    onStatus(result
+      ? { state: 'ready', total: result.total, currency: result.currency, destination: `${result.destination.name} · Zone ${result.destination.zone}` }
+      : { state: 'calculating' })
+  }, [onStatus, loadError, config, inputs, busy, error, quote])
+
   const destination = useMemo(
     () => config?.destinations.find(d => d.code === inputs?.destination),
     [config, inputs?.destination],
@@ -80,7 +107,7 @@ export function DhlShippingPanel({ orderId, planId, orderCurrency }: Props) {
   const incomplete = !canAutoQuote(inputs, config)
 
   return (
-    <details className="panel dhl-panel" open>
+    <details id={DHL_PANEL_ID} className="panel dhl-panel" open>
       <summary className="dhl-panel__summary">
         <span><Truck size={17} /> DHL shipping</span>
         <small>{config.meta.version.replace('DHL-MT-', '')} CONTRACT · {config.meta.currency}</small>
@@ -94,11 +121,11 @@ export function DhlShippingPanel({ orderId, planId, orderCurrency }: Props) {
               <option value="">Select a destination</option>
               {config.destinations.map(d => <option key={d.code} value={d.code}>{d.name} · Zone {d.zone}</option>)}
             </select>
-            <small className={detected ? '' : 'dhl-warning'}>
+{/*             <small className={detected ? '' : 'dhl-warning'}>
               {detected
                 ? inputs.destination === detected.code ? `Detected from ${detected.source}.` : `Detected ${detected.name} from ${detected.source}; changed manually.`
                 : 'No destination country found in the PO. Select it manually.'}
-            </small>
+            </small> */}
           </label>
           <label><span>Shipment date</span><Input type="date" max={config.meta.valid_to} value={inputs.shipment_date} onChange={e => set({ shipment_date: e.target.value })} /></label>
           <label><span>Delivery service</span>
@@ -107,9 +134,9 @@ export function DhlShippingPanel({ orderId, planId, orderCurrency }: Props) {
             </select>
           </label>
         </div>
-        <p className="dhl-note">
+{/*         <p className="dhl-note">
           One multi-piece shipment, not a separate minimum charge per box.{destination ? ` Selected tariff zone ${destination.zone}.` : ''} Express Worldwide export rates from the DHL 2026 rate card. Third-country and import shipments are not supported. Service availability must be confirmed with DHL.
-        </p>
+        </p> */}
 
         <h3 className="dhl-subtitle">Shipping surcharges &amp; VAT</h3>
         <div className="dhl-grid">
@@ -146,9 +173,9 @@ export function DhlShippingPanel({ orderId, planId, orderCurrency }: Props) {
           <label className="dhl-check"><input type="checkbox" checked={inputs.remote_area} onChange={e => set({ remote_area: e.target.checked })} /> Remote area delivery (0.50 €/kg, min. 24.00 €)</label>
           <label className="dhl-inline"><span>Other charges (€)</span><Input type="number" min="0" step="0.01" value={inputs.other_eur} onChange={e => set({ other_eur: numberOrNull(e.target.value) ?? 0 })} /></label>
         </div>
-        <p className="dhl-note">
+{/*         <p className="dhl-note">
           Fuel applies to transport, premium, handling, remote area and demand charges, not GoGreen. VAT applies to the complete shipping subtotal. Per-kg surcharges use the rounded shipment tariff weight. The quote is recalculated and saved automatically when any value changes.
-        </p>
+        </p> */}
 
         <div className="dhl-status" aria-live="polite">
           {busy ? <span><LoaderCircle className="spin" size={15} /> Calculating DHL quote…</span>

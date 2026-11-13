@@ -180,6 +180,8 @@ export interface Client {
   address: string
   country: string
   shipping_address: string
+  /** ISO 3166-1 alpha-2 code resolved from `country` by the API; null when it is blank or unknown. */
+  country_code?: string | null
   created_at: string
   updated_at: string
 }

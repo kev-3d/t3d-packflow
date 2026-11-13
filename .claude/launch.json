@@ -12,6 +12,13 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
       "port": 5173
+    },
+    {
+      "name": "web-alt-api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--port", "5175"],
+      "env": { "PACKFLOW_API_PROXY": "http://127.0.0.1:8003" },
+      "port": 5175
     }
   ]
 }

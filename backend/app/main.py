@@ -24,12 +24,15 @@ from .database import (
     connect, get_shipping_quote, init_db, latest_plan, now_iso, rows_to_dicts, save_shipping_quote,
 )
 from .destinations import detect_destination
+from .geo import with_country_code
 from .dhl_surcharges import REGION_LABELS, load_surcharges
 from .extraction import (
     extract_email, extract_pdf, parse_catalog_excel, parse_clients_excel, parse_reference_workbook,
 )
 from .packing import fill_existing_plan, pack_order
+from .labels import render_box_labels_pdf
 from .reports import render_analysis_pdf
+from .shipping_docs import DEFAULT_EXPORTER, build_shipment, render_packing_list_pdf
 
 
 class ProductPayload(BaseModel):
@@ -909,6 +912,95 @@ def export_order_pdf(order_id: int) -> Response:
     return download_analysis_report(order_id, report["id"])
 
 
+class ExporterPayload(BaseModel):
+    company: str = Field(min_length=1)
+    address: str = ""
+    phone: str = ""
+    contact: str = ""
+    country_of_origin: str = ""
+    packing_info: str = ""
+    signatory_name: str = ""
+    signatory_title: str = ""
+
+
+def _load_exporter(db: sqlite3.Connection) -> dict[str, str]:
+    row = db.execute("SELECT value FROM app_settings WHERE key = 'exporter_profile'").fetchone()
+    stored = json.loads(row["value"]) if row else {}
+    return {**DEFAULT_EXPORTER, **{k: v for k, v in stored.items() if k in DEFAULT_EXPORTER}}
+
+
+@app.get("/api/settings/exporter")
+def get_exporter() -> dict[str, str]:
+    with connect() as db:
+        return _load_exporter(db)
+
+
+@app.put("/api/settings/exporter")
+def update_exporter(payload: ExporterPayload) -> dict[str, str]:
+    with connect() as db:
+        db.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('exporter_profile', ?)",
+                   (json.dumps(payload.model_dump()),))
+        return _load_exporter(db)
+
+
+def _shipment_for(order_id: int) -> dict[str, Any]:
+    """Order + complete plan + exporter, consignee, destination and dispatch for shipping documents."""
+    order = get_order(order_id)
+    if not order.get("plan") or order["plan"]["result"]["status"] != "complete":
+        raise HTTPException(422, "Calculate a complete packing plan before generating shipping documents.")
+    with connect() as db:
+        exporter = _load_exporter(db)
+        client = db.execute("SELECT * FROM clients WHERE lower(trim(customer)) = lower(trim(?))",
+                            (order["client"] or "",)).fetchone()
+        destination = _detect_order_destination(db, order_id)
+        quote = get_shipping_quote(db, order_id)
+    client = dict(client) if client else {}
+    address = (order.get("delivery_address") or client.get("shipping_address")
+               or client.get("address") or "")
+    country = (destination or {}).get("name") or client.get("country") or ""
+    if country and country.lower() not in address.lower():
+        address = f"{address}\n{country}".strip()
+    consignee = {
+        "name": order.get("client") or client.get("customer") or "",
+        "address": address,
+        "contact": client.get("contact_name", ""),
+        "phone": client.get("phone_number", ""),
+        "email": client.get("email", ""),
+    }
+    dispatch = ""
+    if quote:
+        service = dhl_pricing.SERVICES.get(quote["inputs"].get("service", "express_worldwide"), "Express")
+        dispatch = f"Courier - DHL {service}"
+    return build_shipment(order, exporter=exporter, consignee=consignee,
+                          destination=country, dispatch=dispatch)
+
+
+def _safe_number(order_number: str, fallback: int) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "", order_number) or str(fallback)
+
+
+@app.get("/api/orders/{order_id}/packing-list.pdf")
+def export_packing_list(order_id: int) -> Response:
+    shipment = _shipment_for(order_id)
+    content = render_packing_list_pdf(shipment)
+    filename = f"packing-list-{_safe_number(shipment['order_number'], order_id)}.pdf"
+    return Response(content=content, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.get("/api/orders/{order_id}/labels.pdf")
+def export_box_labels(order_id: int, box: int | None = Query(default=None, ge=1)) -> Response:
+    shipment = _shipment_for(order_id)
+    try:
+        content = render_box_labels_pdf(shipment, box)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    suffix = f"-box{box}" if box else ""
+    filename = f"labels-{_safe_number(shipment['order_number'], order_id)}{suffix}.pdf"
+    return Response(content=content, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @app.get("/api/orders/{order_id}/export")
 def export_order(order_id: int) -> StreamingResponse:
     order = get_order(order_id)
@@ -1281,9 +1373,8 @@ async def import_catalog(catalog_type: str, file: UploadFile = File(...)) -> dic
 @app.get("/api/clients")
 def list_clients() -> list[dict[str, Any]]:
     with connect() as db:
-        return rows_to_dicts(
-            db.execute("SELECT * FROM clients ORDER BY lower(customer)").fetchall()
-        )
+        rows = db.execute("SELECT * FROM clients ORDER BY lower(customer)").fetchall()
+    return [with_country_code(dict(row)) for row in rows]
 
 
 @app.post("/api/clients/import")
@@ -1359,7 +1450,7 @@ def update_client(client_id: int, payload: ClientPayload) -> dict[str, Any]:
             )
         except sqlite3.IntegrityError as exc:
             raise HTTPException(409, "Another client already uses this customer name.") from exc
-        return dict(_client_or_404(db, client_id))
+        return with_country_code(dict(_client_or_404(db, client_id)))
 
 
 @app.delete("/api/clients")

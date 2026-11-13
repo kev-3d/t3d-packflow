@@ -11,14 +11,17 @@ import {
   useTable,
   type SortingState,
 } from '@tanstack/react-table'
-import { ArrowDown, ArrowUp, ArrowUpDown, FileSpreadsheet, LoaderCircle, Pencil, Search, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowDown, ArrowUp, ArrowUpDown, FileSpreadsheet, LoaderCircle, Map as MapIcon, Pencil, Search, Table2, Trash2 } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { DeleteClientsDialog, EditClientDialog } from '../components/ClientDialogs'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
 import type { Client, ClientInput } from '../types'
+
+// Leaflet and the country shapes are only downloaded when the map view is opened.
+const ClientsMap = lazy(() => import('../components/ClientsMap'))
 
 const features = tableFeatures({
   columnVisibilityFeature,
@@ -93,6 +96,7 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
   const [query, setQuery] = useState('')
+  const [view, setView] = useState<'table' | 'map'>('table')
   const [sorting, setSorting] = useState<SortingState>([{ id: 'customer', desc: false }])
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 10 })
   const fileRef = useRef<HTMLInputElement>(null)
@@ -187,6 +191,10 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
         <div className="catalog-health"><span>CLIENT DIRECTORY</span><strong>{clients.length} records</strong></div>
       </header>
       <p className="results-count" role="status">{filtered.length} of {clients.length} clients</p>
+      <div className="catalog-tabs" role="group" aria-label="Clients view">
+        <button aria-pressed={view === 'table'} className={ view === 'table' ? 'active' : ''} onClick={() => setView('table')}><Table2 size={18} /> Table</button>
+        <button aria-pressed={view === 'map'} className={view === 'map' ? 'active' : ''} onClick={() => setView('map')}><MapIcon size={18} /> Map</button>
+      </div>
       <section className="panel data-panel">
         <div className="table-tools">
           <label><Search size={17} /><Input aria-label="Search clients" type="search" value={query} onChange={(event) => { setQuery(event.target.value); table.setPageIndex(0) }} placeholder="Search customer, contact, email or country…" /></label>
@@ -200,6 +208,11 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
             </button>
           </div>
         </div>
+        {view === 'map' ? (
+          <Suspense fallback={<p className="clients-map__loading" role="status">Loading map…</p>}>
+            {loading ? <p className="clients-map__loading" role="status">Loading clients…</p> : <ClientsMap clients={filtered} />}
+          </Suspense>
+        ) : <>
         <div className="clients-table">
           <Table aria-label="Clients list">
             <TableHeader>
@@ -233,6 +246,7 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
             <Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>Next</Button>
           </div>
         </div>
+        </>}
       </section>
       {/*<p className="clients-hint">Excel columns: Customer (required), Phone Number, Email, Contact Name, Address, Country, Shipping Address. Rows with an existing customer name update that client.</p>*/}
       {editing && <EditClientDialog client={editing} onClose={() => setEditing(null)} onSave={saveClient} />}

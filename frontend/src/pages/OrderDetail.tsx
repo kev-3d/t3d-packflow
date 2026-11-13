@@ -1,7 +1,7 @@
 import { Gauge } from '../components/charts/gauge'
 import { Input } from '../components/ui/input'
 import { Button } from '../components/ui/button'
-import { AlertTriangle, ArrowLeft, Box, Check, ChevronDown, Download, FileCheck2, LoaderCircle, Package, Pencil, Plus, Save, Scale, Sparkles, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Box, Check, ChevronDown, Download, FileCheck2, LoaderCircle, Package, Pencil, Plus, Save, Scale, Sparkles, Tag, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, api } from '../api'
 import { BoxNavigation } from '../components/BoxNavigation'
@@ -10,7 +10,7 @@ import { SourceDocument } from '../components/SourceDocument'
 import { RecommendationPreview } from '../components/RecommendationPreview'
 import { prioritySuggestions, type RecommendationPreview as Preview } from '../workflow'
 import { BoxVisual } from '../components/BoxVisual'
-import { DhlShippingPanel } from '../components/DhlShippingPanel'
+import { DHL_PANEL_ID, DhlShippingPanel, type DhlRateStatus } from '../components/DhlShippingPanel'
 import { colorForProduct } from '../components/box3d/sceneBuilder'
 import { ReviewProductsTable } from '../components/ReviewProductsTable'
 import { fieldId, makeDraft, reviewPayload, serverIssues, validateReview, type DraftItem, type ReviewIssue } from '../review'
@@ -37,6 +37,7 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
   const [exportOpen, setExportOpen] = useState(false)
   const [highlightedProduct, setHighlightedProduct] = useState('')
   const exportMenuRef = useRef<HTMLDivElement>(null)
+  const [dhlRate, setDhlRate] = useState<DhlRateStatus>({ state: 'loading' })
   const [operation, setOperation] = useState('')
   const [matchedItems, setMatchedItems] = useState(order.items)
   const [catalog, setCatalog] = useState<Product[]>()
@@ -67,7 +68,6 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
   const validationIssues = validateReview(draft, matchedItems, catalog)
   const issues = [...validationIssues.filter(issue => issue.kind === 'warning' || attempted || issue.packingOnly), ...remoteIssues]
   const errors = issues.filter(issue => issue.kind === 'error')
-  const warnings = issues.filter(issue => issue.kind === 'warning')
   const focusSummary = () => requestAnimationFrame(() => summaryRef.current?.focus())
   const inputAttributes = (field: string) => ({ id: fieldId(field), 'aria-invalid': errors.some(e => e.field === field) || undefined, 'aria-describedby': errors.some(e => e.field === field) ? `${fieldId(field)}-error` : undefined })
   const editDraft: typeof setDraft = update => { setDraft(update); setRemoteIssues([]); setReviewMessage('') }
@@ -152,6 +152,19 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
     } finally { setBusy(false); setExportingPdf(false); setOperation('') }
   }
 
+  const exportShippingDoc = async (kind: 'packing-list' | 'labels', box?: number) => {
+    const what = kind === 'packing-list' ? 'packing list' : box ? `label for box ${box}` : 'box labels'
+    setBusy(true)
+    setExportingPdf(true); setOperation(`Preparing the ${what}…`)
+    try {
+      if (kind === 'packing-list') await api.packingListPdf(order.id, order.order_number)
+      else await api.boxLabelsPdf(order.id, order.order_number, box)
+      notify(`${what.charAt(0).toUpperCase()}${what.slice(1)} download started.`)
+    } catch (error) {
+      notify(error instanceof Error ? error.message : `The ${what} could not be generated.`, true)
+    } finally { setBusy(false); setExportingPdf(false); setOperation('') }
+  }
+
   const previewRecommendation = async (recommendation: PackingResult['product_recommendations'][number]) => {
     if (!order.plan) return
     setBusy(true); setOperation('Evaluating this addition in the packing engine…'); setPreviewError('')
@@ -217,6 +230,8 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
             {exportOpen && <div className="export-menu__list" role="menu" aria-label="Export format">
               <button type="button" role="menuitem" disabled={result?.status !== 'complete'} onClick={() => { setExportOpen(false); exportPdf() }}><span>PDF</span><small>Printable packing plan</small></button>
               <button type="button" role="menuitem" onClick={() => { setExportOpen(false); exportExcel() }}><span>Excel</span><small>Editable workbook</small></button>
+              <button type="button" role="menuitem" disabled={result?.status !== 'complete'} onClick={() => { setExportOpen(false); exportShippingDoc('packing-list') }}><span>Packing list</span><small>Shipment document (PDF)</small></button>
+              <button type="button" role="menuitem" disabled={result?.status !== 'complete'} onClick={() => { setExportOpen(false); exportShippingDoc('labels') }}><span>Box labels</span><small>One 10×10 cm label per box (PDF)</small></button>
             </div>}
           </div>}
           {order.plan && !editing && <Button className="button button--accent" disabled={busy || result?.status !== 'complete'} onClick={saveAndFinish}>{savingPlan ? <LoaderCircle className="spin" size={17} /> : <Save size={17} />}{savingPlan ? 'Saving…' : 'Save & Finish'}</Button>}
@@ -231,14 +246,13 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
         <section className="review-layout ">
           <article className="panel review-form-panel">
             <header className="panel-header"><div><span className="panel-index">01</span><div><h2>Order information</h2><p>Confirm the order details and products before calculating</p></div></div><span className="review-badge"><FileCheck2 size={15} /> {errors.length ? `${errors.length} issues to review` : 'Review required'}</span></header>
-            <div ref={summaryRef} tabIndex={-1} className={`review-validation ${errors.length || reviewMessage ? 'review-validation--error' : ''}`} aria-labelledby="review-validation-title">
-              <h3 id="review-validation-title">{errors.length ? `${errors.length} blocking ${errors.length === 1 ? 'issue' : 'issues'}` : 'Review packing data before calculating'}</h3>
+            {/* The review notice only appears when there is something to act on: blocking issues, a save result, or a catalog load failure. */}
+            {(errors.length > 0 || reviewMessage || catalogError) && <div ref={summaryRef} tabIndex={-1} className={`review-validation ${errors.length || reviewMessage ? 'review-validation--error' : ''}`} aria-labelledby="review-validation-title">
+              <h3 id="review-validation-title">{errors.length ? `${errors.length} blocking ${errors.length === 1 ? 'issue' : 'issues'}` : 'Review the order details'}</h3>
               {reviewMessage && <p role="alert">{reviewMessage}</p>}
               {!!errors.length && <ul>{errors.map((issue, index) => <li key={`${issue.field}-${index}`}><a href={`#${fieldId(issue.field)}`} onClick={event => { event.preventDefault(); document.getElementById(fieldId(issue.field))?.focus() }}>{issue.field.startsWith('items.') ? `Product ${Number(issue.field.split('.')[1]) + 1}: ` : ''}{issue.message}</a></li>)}</ul>}
-              <details className="review-warning-list"><summary>{warnings.length} {warnings.length === 1 ? 'warning' : 'warnings'} — review non-blocking information</summary><ul>{warnings.map((issue, index) => <li key={`${issue.field}-${index}`}><a href={`#${fieldId(issue.field)}`} onClick={event => { event.preventDefault(); document.getElementById(fieldId(issue.field))?.focus() }}>{issue.field.startsWith('items.') ? `Product ${Number(issue.field.split('.')[1]) + 1}: ` : ''}{issue.message}</a></li>)}</ul></details>
-              <p>Physical catalog issues block calculation, but you can save valid order details to recheck matches. Measurements are read-only; correct them in Products and boxes.</p>
               {catalogError && <p>Live catalog could not be loaded. Only previously returned packing data is shown; rotation and availability may be unknown. Save to retry.</p>}
-            </div>
+            </div>}
             <div className="order-fields">
               <label><span>Order number</span><Input {...inputAttributes('order_number')} disabled={busy} value={draft.order_number} onChange={(e) => editDraft({ ...draft, order_number: e.target.value })} /></label>
               <label className="wide"><span>Customer</span><Input {...inputAttributes('client')} disabled={busy} value={draft.client} onChange={(e) => editDraft({ ...draft, client: e.target.value })} /></label>
@@ -270,9 +284,25 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
         <>
           {/* <h2 id="packing-performance-title" tabIndex={-1} className="results-heading">Packing performance</h2> */}
           <section className="plan-kpis" aria-labelledby="packing-performance-title">
-            <article><span>BOXES REQUIRED</span><strong>{result.box_count}<small> {result.box_count === 1 ? 'box' : 'boxes'}</small></strong><i><Package /></i></article>
-            <article><span>TOTAL UTILIZATION <details className="metric-help"><summary aria-label="How total utilization is calculated">?</summary><p>Total packed product volume divided by the total volume of selected boxes. This is volume-weighted, not an average of box percentages. Unassigned units are excluded.</p></details></span><strong>{result.average_utilization}<small>%</small></strong><i><Box /></i></article>
-            <article><span>GROSS WEIGHT</span><strong>{result.total_weight_kg}<small> kg</small></strong><i><Scale /></i></article>
+            <article><span className="kpi-title"><Package aria-hidden="true" /> BOXES REQUIRED</span><strong>{result.box_count}<small> {result.box_count === 1 ? 'box' : 'boxes'}</small></strong></article>
+            <article><span className="kpi-title"><Box aria-hidden="true" /> TOTAL UTILIZATION <details className="metric-help"><summary aria-label="How total utilization is calculated">?</summary><p>Total packed product volume divided by the total volume of selected boxes. This is volume-weighted, not an average of box percentages. Unassigned units are excluded.</p></details></span><strong>{result.average_utilization}<small>%</small></strong></article>
+            <article><span className="kpi-title"><Scale aria-hidden="true" /> GROSS WEIGHT</span><strong>{result.total_weight_kg}<small> kg</small></strong></article>
+            <article className="dhl-rate-card">
+              <button type="button" aria-controls={DHL_PANEL_ID} title="Show the DHL shipping details" onClick={() => {
+                const panel = document.getElementById(DHL_PANEL_ID) as HTMLDetailsElement | null
+                if (panel) { panel.open = true; panel.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
+              }}>
+                <span className="kpi-title">
+                  <img src="/dhl-logo.png" alt="" className="kpi-title__logo" />
+                  DHL RATE
+                  {dhlRate.state === 'ready' && dhlRate.destination && <b className="kpi-title__meta">- {dhlRate.destination}</b>}
+                </span>
+                {dhlRate.state === 'ready' && dhlRate.total !== undefined
+                  ? <strong><small>{dhlRate.currency} </small>{dhlRate.total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  : <strong className="dhl-rate-card__pending">{dhlRate.state === 'loading' || dhlRate.state === 'calculating' ? <LoaderCircle className="spin" size={20} /> : '—'}</strong>}
+                {dhlRate.state !== 'ready' && <em>{dhlRate.state === 'loading' || dhlRate.state === 'calculating' ? 'Calculating…' : dhlRate.message}</em>}
+              </button>
+            </article>
 
           </section>
           <section id="selected-box-details" className="packing-workbench pb-3" aria-labelledby={`select-box-${selectedBox.sequence}`}>
@@ -285,10 +315,11 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
               <div className="utilization-readout"><div className="box-gauge" role="img" aria-label={`${selectedBox.utilization}% volume utilization`}><Gauge value={selectedBox.utilization} width={90} height={90} totalNotches={40} spacing={45} activeFill="#389D9B" inactiveFill="#E5E5E3" /><strong>{selectedBox.utilization}%</strong></div><div><b>Volume utilization</b><p>{selectedBox.remaining_volume_l} L available</p></div></div>
               <div className="inspector-metrics"><span><small>GROSS WEIGHT</small><b>{selectedBox.gross_weight_kg} kg</b></span><span><small>CAPACITY</small><b>{selectedBox.max_weight_kg} kg</b></span><span><small>UNITS</small><b>{selectedBox.placements.length}</b></span><span><small>DIMENSIONS</small><b>{selectedBox.dimensions_cm.join('×')}</b></span></div>
               <div className="contents-list"><h3 id="box-contents-title">Contents</h3><div className="box-legend box-legend--inspector" role="group" aria-labelledby="box-contents-title">{selectedBox.items.map(item => <button key={item.sku} type="button" aria-pressed={highlightedProduct === item.sku} title="Highlight this product in the 3D view" onClick={() => setHighlightedProduct(current => current === item.sku ? '' : item.sku)}><i style={{ background: colorForProduct(item.sku) }} /><span>{item.name}</span><b>×{item.quantity}</b></button>)}</div></div>
+              {result.status === 'complete' && <Button className="button button--ghost box-label-button" disabled={busy} onClick={() => exportShippingDoc('labels', selectedBox.sequence)}><Tag size={16} /> Print label for box {selectedBox.sequence}</Button>}
             </aside>
           </section>
 
-          <DhlShippingPanel orderId={order.id} planId={order.plan?.id ?? null} orderCurrency={order.currency} />
+          <DhlShippingPanel orderId={order.id} planId={order.plan?.id ?? null} orderCurrency={order.currency} onStatus={setDhlRate} />
 
 
           <section className="plan-bottom-grid">
