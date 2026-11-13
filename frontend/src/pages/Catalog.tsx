@@ -1,7 +1,8 @@
 import { Badge } from '../components/ui/badge'
 import { Input } from '../components/ui/input'
 import { Button } from '../components/ui/button'
-import { Box, FileSpreadsheet, PackagePlus, Plus, RotateCcw, Ruler, Search, X } from 'lucide-react'
+import { AlertTriangle, Box, FileSpreadsheet, LoaderCircle, PackagePlus, Plus, RotateCcw, Ruler, Search, Trash2, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import { useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { useDialogFocus } from '../hooks/useDialogFocus'
@@ -20,6 +21,24 @@ export function Catalog({ products, boxes, onRefresh, notify }: CatalogProps) {
   const [showForm, setShowForm] = useState(false)
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const [toDelete, setToDelete] = useState<PendingDelete | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
+  const askDelete = (record: PendingDelete) => { setDeleteError(''); setToDelete(record) }
+  const confirmDelete = async () => {
+    if (!toDelete) return
+    setDeleting(true); setDeleteError('')
+    try {
+      if (toDelete.type === 'products') await api.deleteProduct(toDelete.id)
+      else await api.deleteBox(toDelete.id)
+      notify(`${toDelete.label} deleted from the catalog.`)
+      setToDelete(null)
+      onRefresh()
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'The record could not be deleted.')
+    } finally { setDeleting(false) }
+  }
 
   const filteredProducts = useMemo(() => products.filter((product) =>
     product.name.toLowerCase().includes(query.toLowerCase()),
@@ -76,7 +95,7 @@ export function Catalog({ products, boxes, onRefresh, notify }: CatalogProps) {
                 <span>{product.weight_kg.toFixed(2)} kg</span>
                 <span><RotateCcw size={15} /> {product.rotation_allowed ? 'Allowed' : 'Fixed'}</span>
                 <span>{product.fragile ? 'Fragile' : 'Standard'}</span>
-                <Badge className="status-pill status-pill--packed"><i />Active</Badge>
+                <div className="catalog-row-end"><Badge className="status-pill status-pill--packed"><i />Active</Badge><button type="button" className="row-delete-button" aria-label={`Delete product ${product.name}`} title="Delete product" onClick={() => askDelete({ type: 'products', id: product.id, label: product.name })}><Trash2 size={16} /></button></div>
               </div>
             ))}
           </div>
@@ -89,14 +108,36 @@ export function Catalog({ products, boxes, onRefresh, notify }: CatalogProps) {
                 <span><Ruler size={15} /> {box.length_cm} × {box.width_cm} × {box.height_cm} cm</span>
                 <span>{box.empty_weight_kg.toFixed(2)} kg</span><span>{box.max_weight_kg.toFixed(1)} kg</span>
                 <span>{((box.length_cm * box.width_cm * box.height_cm) / 1000).toFixed(1)} L</span>
-                <Badge className="status-pill status-pill--packed"><i />Active</Badge>
+                <div className="catalog-row-end"><Badge className="status-pill status-pill--packed"><i />Active</Badge><button type="button" className="row-delete-button" aria-label={`Delete box ${box.code}`} title="Delete box" onClick={() => askDelete({ type: 'boxes', id: box.id, label: box.code })}><Trash2 size={16} /></button></div>
               </div>
             ))}
           </div>
         )}
       </section>
+      {toDelete && <DeleteRecordDialog record={toDelete} busy={deleting} error={deleteError} onClose={() => setToDelete(null)} onConfirm={confirmDelete} />}
       {showForm && <CatalogForm type={tab} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); notify('Record added to the catalog.'); onRefresh() }} />}
     </div>
+  )
+}
+
+interface PendingDelete { type: 'products' | 'boxes'; id: number; label: string }
+
+function DeleteRecordDialog({ record, busy, error, onClose, onConfirm }: { record: PendingDelete; busy: boolean; error: string; onClose: () => void; onConfirm: () => void }) {
+  const dialogRef = useDialogFocus<HTMLElement>(onClose, busy)
+  const noun = record.type === 'products' ? 'product' : 'box type'
+  const impact = record.type === 'products'
+    ? 'Order lines that use it will need to be matched again before their next calculation. Saved packing plans are kept.'
+    : 'It will no longer be used for new packing plans. Saved packing plans are kept.'
+  return createPortal(
+    <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="delete-record-title" aria-describedby="delete-record-description">
+      <button className="modal-backdrop" tabIndex={-1} aria-hidden="true" disabled={busy} onClick={onClose} aria-label="Cancel deletion" />
+      <section className="upload-modal delete-orders-dialog" ref={dialogRef}>
+        <header><div><span className="eyebrow">CATALOG / {record.type === 'products' ? 'PRODUCT' : 'BOX TYPE'}</span><h2 id="delete-record-title">Delete {record.label}?</h2></div><button className="icon-button" disabled={busy} onClick={onClose} aria-label="Close dialog"><X size={20} /></button></header>
+        <div className="delete-orders-body"><AlertTriangle size={28} /><p id="delete-record-description">This will permanently remove the {noun} {record.label} from the catalog. {impact} This cannot be undone.</p></div>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <footer><Button className="button button--ghost" disabled={busy} onClick={onClose}>Keep {noun}</Button><Button className="button button--danger" disabled={busy} onClick={onConfirm}>{busy ? <LoaderCircle className="spin" size={16} /> : <Trash2 size={16} />}{busy ? 'Deleting…' : `Delete ${noun}`}</Button></footer>
+      </section>
+    </div>, document.body,
   )
 }
 

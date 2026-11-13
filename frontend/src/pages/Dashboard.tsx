@@ -39,7 +39,7 @@ export function Dashboard({ data, onOpenOrder, onUpload, onViewOrders }: Dashboa
     { label: 'Planned weight', value: `${data.kpis.total_weight_kg} kg`, caption: 'Across saved plans', icon: Scale },
   ]
   return <div className="page dashboard-page">
-    <header className="page-header"><div><h1>Every shipment, well prepared.</h1><p>Organize your orders and make the most of every box.</p></div></header>
+    <header className="page-header"><div><h1>Dashboard</h1><p>Organize your orders and make the most of every box.</p></div></header>
     <Card className="efficiency-card">
       <div className="efficiency-chart"><h2>Packing efficiency</h2>
         {series.length ? <ChartContainer config={{value:{label:'Utilization',color:'#242424'}}} className="h-44 w-full" aria-label="Utilization of the latest calculated orders">

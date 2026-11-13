@@ -13,7 +13,7 @@ from app.extraction import extract_email
 from app.main import (
     EmailOrderPayload, OrderItemPayload, OrderReviewPayload, SuggestedItemPayload,
     app, add_suggested_item, analyze_order, create_email_order, create_manual_order,
-    delete_all_orders, download_analysis_report, export_order_pdf, get_order, list_analysis_reports,
+    delete_all_orders, delete_box, delete_order, delete_product, download_analysis_report, export_order_pdf, get_order, list_analysis_reports,
     review_order, save_analysis_report,
 )
 from app.packing import fill_existing_plan, pack_order
@@ -139,6 +139,32 @@ class BackendFeatureTests(unittest.TestCase):
             self.assertEqual(json.loads(content), [])
         asyncio.run(scenario())
 
+    def test_delete_catalog_records_unmatches_orders_and_does_not_reseed(self):
+        order = self.make_order()
+        product_id = order["items"][0]["product_id"]
+        self.assertIsNotNone(product_id)
+        self.assertEqual(delete_product(product_id)["deleted_product_id"], product_id)
+        self.assertIsNone(get_order(order["id"])["items"][0]["product_id"])
+        with self.assertRaises(HTTPException) as missing:
+            delete_product(product_id)
+        self.assertEqual(missing.exception.status_code, 404)
+
+        with database.connect() as db:
+            box_ids = [row["id"] for row in db.execute("SELECT id FROM box_types")]
+            product_ids = [row["id"] for row in db.execute("SELECT id FROM products")]
+        for box_id in box_ids:
+            delete_box(box_id)
+        for remaining in product_ids:
+            delete_product(remaining)
+        with self.assertRaises(HTTPException) as missing_box:
+            delete_box(box_ids[0])
+        self.assertEqual(missing_box.exception.status_code, 404)
+
+        database.init_db()
+        with database.connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM box_types").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM products").fetchone()[0], 0)
+
     def test_delete_all_orders_cascades_and_does_not_reseed_after_restart(self):
         order = self.make_order()
         analyze_order(order["id"])
@@ -155,6 +181,21 @@ class BackendFeatureTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM products").fetchone()[0], products)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM box_types").fetchone()[0], boxes)
         self.assertEqual(delete_all_orders(), {"deleted_orders": 0})
+
+    def test_delete_single_order_cascades_and_keeps_other_orders(self):
+        order = self.make_order()
+        other = create_email_order(EmailOrderPayload(text=EMAIL))
+        analyze_order(order["id"])
+        save_analysis_report(order["id"])
+        result = delete_order(order["id"])
+        self.assertEqual(result, {"deleted_order_id": order["id"], "order_number": order["order_number"]})
+        with database.connect() as db:
+            for table in ["order_items", "packing_plans", "analysis_reports"]:
+                self.assertEqual(db.execute(f"SELECT COUNT(*) FROM {table} WHERE order_id = ?", (order["id"],)).fetchone()[0], 0)
+        self.assertEqual(get_order(other["id"])["id"], other["id"])
+        with self.assertRaises(HTTPException) as missing:
+            delete_order(order["id"])
+        self.assertEqual(missing.exception.status_code, 404)
 
     def test_qing_email_creates_reviewable_order_and_preserves_body(self):
         order = create_email_order(EmailOrderPayload(text=EMAIL))

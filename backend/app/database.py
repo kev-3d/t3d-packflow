@@ -127,6 +127,29 @@ def init_db() -> None:
                 created_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS clients (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer TEXT NOT NULL,
+                phone_number TEXT NOT NULL DEFAULT '',
+                email TEXT NOT NULL DEFAULT '',
+                contact_name TEXT NOT NULL DEFAULT '',
+                address TEXT NOT NULL DEFAULT '',
+                country TEXT NOT NULL DEFAULT '',
+                shipping_address TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS shipping_quotes (
+                order_id INTEGER PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+                plan_id INTEGER,
+                inputs_json TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                tariff_version TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_customer ON clients(lower(trim(customer)));
             CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
             CREATE INDEX IF NOT EXISTS idx_plans_order ON packing_plans(order_id, id DESC);
             """
@@ -209,7 +232,10 @@ def seed_reference_catalog(db: sqlite3.Connection) -> None:
 
 
 def seed_demo_data(db: sqlite3.Connection) -> None:
-    if db.execute("SELECT COUNT(*) FROM products").fetchone()[0] == 0:
+    # Seed the demo catalog only once, so records the user deletes do not return on restart.
+    catalog_seeded = db.execute("SELECT 1 FROM app_settings WHERE key = 'demo_catalog_seeded'").fetchone()
+    db.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('demo_catalog_seeded', '1')")
+    if not catalog_seeded and db.execute("SELECT COUNT(*) FROM products").fetchone()[0] == 0:
         timestamp = now_iso()
         db.executemany(
             """
@@ -229,7 +255,7 @@ def seed_demo_data(db: sqlite3.Connection) -> None:
             ],
         )
 
-    if db.execute("SELECT COUNT(*) FROM box_types").fetchone()[0] == 0:
+    if not catalog_seeded and db.execute("SELECT COUNT(*) FROM box_types").fetchone()[0] == 0:
         timestamp = now_iso()
         db.executemany(
             """
@@ -305,6 +331,32 @@ def seed_demo_data(db: sqlite3.Connection) -> None:
                     for sku, quantity, price in items
                 ],
             )
+
+
+def get_shipping_quote(db: sqlite3.Connection, order_id: int) -> dict[str, Any] | None:
+    row = db.execute("SELECT * FROM shipping_quotes WHERE order_id = ?", (order_id,)).fetchone()
+    if not row:
+        return None
+    return {
+        "order_id": row["order_id"],
+        "plan_id": row["plan_id"],
+        "inputs": json.loads(row["inputs_json"]),
+        "result": json.loads(row["result_json"]),
+        "tariff_version": row["tariff_version"],
+        "created_at": row["created_at"],
+    }
+
+
+def save_shipping_quote(
+    db: sqlite3.Connection, order_id: int, plan_id: int | None, inputs: dict[str, Any], result: dict[str, Any]
+) -> dict[str, Any]:
+    db.execute(
+        """INSERT OR REPLACE INTO shipping_quotes
+           (order_id, plan_id, inputs_json, result_json, tariff_version, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (order_id, plan_id, json.dumps(inputs), json.dumps(result), result["tariff_version"], now_iso()),
+    )
+    return get_shipping_quote(db, order_id)  # type: ignore[return-value]
 
 
 def latest_plan(db: sqlite3.Connection, order_id: int) -> dict[str, Any] | None:

@@ -1,5 +1,5 @@
 import type { RecommendationPreview } from './workflow'
-import type { AnalysisReport, BoxType, DashboardData, OrderDetailData, OrderSummary, Product } from './types'
+import type { AnalysisReport, BoxType, Client, ClientImportResult, ClientInput, DashboardData, DhlConfig, OrderDetailData, OrderSummary, Product, ShippingQuoteInputs, ShippingQuoteResponse } from './types'
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number, public readonly details: unknown) { super(message); this.name = 'ApiError' }
@@ -36,6 +36,7 @@ export const api = {
     }),
   savePackingPlan: (id: number) => request<AnalysisReport>(`/orders/${id}/reports`, { method: 'POST' }),
   deleteAllOrders: () => request<{ deleted_orders: number }>('/orders', { method: 'DELETE' }),
+  deleteOrder: (id: number) => request<{ deleted_order_id: number; order_number: string }>(`/orders/${id}`, { method: 'DELETE' }),
   reviewOrder: (id: number, payload: object) =>
     request<OrderDetailData>(`/orders/${id}`, {
       method: 'PATCH',
@@ -92,6 +93,8 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+  deleteProduct: (id: number) => request<{ deleted_product_id: number; name: string }>(`/catalog/products/${id}`, { method: 'DELETE' }),
+  deleteBox: (id: number) => request<{ deleted_box_id: number; code: string }>(`/catalog/boxes/${id}`, { method: 'DELETE' }),
   createBox: (payload: object) =>
     request<BoxType>('/catalog/boxes', {
       method: 'POST',
@@ -106,4 +109,18 @@ export const api = {
       body,
     })
   },
+  clients: () => request<Client[]>('/clients'),
+  importClients: (file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request<ClientImportResult>('/clients/import', { method: 'POST', body })
+  },
+  updateClient: (id: number, payload: ClientInput) =>
+    request<Client>(`/clients/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  deleteClient: (id: number) => request<{ deleted_client_id: number; customer: string }>(`/clients/${id}`, { method: 'DELETE' }),
+  deleteAllClients: () => request<{ deleted_clients: number }>('/clients', { method: 'DELETE' }),
+  dhlConfig: () => request<DhlConfig>('/shipping/dhl'),
+  shippingQuote: (orderId: number) => request<ShippingQuoteResponse>(`/orders/${orderId}/shipping-quote`),
+  saveShippingQuote: (orderId: number, payload: ShippingQuoteInputs) =>
+    request<ShippingQuoteResponse>(`/orders/${orderId}/shipping-quote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
 }

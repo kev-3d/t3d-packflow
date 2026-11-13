@@ -8,6 +8,7 @@ import unicodedata
 from difflib import SequenceMatcher
 from io import BytesIO
 from contextlib import asynccontextmanager
+from datetime import date
 from typing import Any
 from uuid import uuid4
 
@@ -18,8 +19,15 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from pydantic import BaseModel, Field
 
-from .database import connect, init_db, latest_plan, now_iso, rows_to_dicts
-from .extraction import extract_email, extract_pdf, parse_catalog_excel, parse_reference_workbook
+from . import dhl_pricing
+from .database import (
+    connect, get_shipping_quote, init_db, latest_plan, now_iso, rows_to_dicts, save_shipping_quote,
+)
+from .destinations import detect_destination
+from .dhl_surcharges import REGION_LABELS, load_surcharges
+from .extraction import (
+    extract_email, extract_pdf, parse_catalog_excel, parse_clients_excel, parse_reference_workbook,
+)
 from .packing import fill_existing_plan, pack_order
 from .reports import render_analysis_pdf
 
@@ -85,6 +93,20 @@ class OrderReviewPayload(BaseModel):
     tax_amount: float = Field(default=0, ge=0)
     total_amount: float = Field(default=0, ge=0)
     items: list[OrderItemPayload]
+
+
+class ShippingQuotePayload(BaseModel):
+    destination: str = Field(min_length=2, max_length=10)
+    shipment_date: str
+    service: str = "express_worldwide"
+    fuel_source: str = "dhl"
+    fuel_pct: float | None = Field(default=None, ge=0, le=200)
+    demand_source: str = "dhl"
+    demand_per_kg: float | None = Field(default=None, ge=0, le=100)
+    gogreen_per_kg: float | None = Field(default=None, ge=0, le=100)
+    vat_pct: float | None = Field(default=None, ge=0, le=100)
+    remote_area: bool = False
+    other_eur: float = Field(default=0, ge=0)
 
 
 def _line_amount(item: OrderItemPayload) -> float:
@@ -446,6 +468,19 @@ def delete_all_orders() -> dict[str, int]:
     return {"deleted_orders": count}
 
 
+@app.delete("/api/orders/{order_id}")
+def delete_order(order_id: int) -> dict[str, Any]:
+    with connect() as db:
+        row = db.execute("SELECT order_number FROM orders WHERE id = ?", (order_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Order not found.")
+        # Foreign key cascades remove its items, packing plans and saved PDFs.
+        db.execute("DELETE FROM orders WHERE id = ?", (order_id,))
+        # Deleting the last order by hand must not bring the demo orders back on restart.
+        db.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('demo_orders_seeded', '1')")
+    return {"deleted_order_id": order_id, "order_number": row["order_number"]}
+
+
 @app.get("/api/orders/{order_id}")
 def get_order(order_id: int) -> dict[str, Any]:
     with connect() as db:
@@ -496,11 +531,17 @@ async def upload_order(file: UploadFile = File(...)) -> dict[str, Any]:
             and existing["source_filename"] == file.filename
             and existing["status"] in {"needs_review", "ready"}
         )
+        # Reading warnings stay visible on the order (for example, an ambiguous date or an unverified line)
+        # so that nothing is accepted silently.
+        notes = "\n".join(part for part in [
+            extracted["notes"],
+            ("Reading warnings: " + " ".join(extracted["warnings"])) if extracted.get("warnings") else "",
+        ] if part)
         values = (
             extracted["client"], extracted["vendor"], extracted["order_date"],
             extracted["requested_date"], extracted["currency"], file.filename,
             extracted["delivery_address"], extracted["billing_address"],
-            extracted["terms"], extracted["notes"], extracted["subtotal"],
+            extracted["terms"], notes, extracted["subtotal"],
             extracted["tax_amount"], extracted["total_amount"],
             extracted["confidence"], now_iso(),
         )
@@ -962,6 +1003,92 @@ def export_order(order_id: int) -> StreamingResponse:
     )
 
 
+def _pdf_text(content: bytes) -> str:
+    try:
+        from pypdf import PdfReader  # noqa: PLC0415
+
+        return "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(content)).pages)
+    except Exception:  # A damaged source PDF must not break the order page.
+        return ""
+
+
+def _detect_order_destination(db: sqlite3.Connection, order_id: int) -> dict[str, Any] | None:
+    """Destination country from the PO: delivery address first, then the source document, then the client."""
+    order = db.execute(
+        "SELECT client, delivery_address, billing_address, notes FROM orders WHERE id = ?", (order_id,)
+    ).fetchone()
+    document = db.execute("SELECT content FROM source_documents WHERE order_id = ?", (order_id,)).fetchone()
+    client = db.execute(
+        "SELECT country, shipping_address FROM clients WHERE lower(trim(customer)) = lower(trim(?))",
+        (order["client"] or "",),
+    ).fetchone()
+    sources = [
+        ("Order delivery address", order["delivery_address"]),
+        ("PO document", _pdf_text(document["content"]) if document else ""),
+        ("Order email / notes", order["notes"]),
+        ("Client country", client["country"] if client else ""),
+        ("Client shipping address", client["shipping_address"] if client else ""),
+        ("Order billing address", order["billing_address"]),
+    ]
+    found = detect_destination(sources)
+    if not found:
+        return None
+    return {**dhl_pricing.zone_for(found["code"]), "source": found["source"]}
+
+
+@app.get("/api/shipping/dhl")
+def get_dhl_config() -> dict[str, Any]:
+    tariff = dhl_pricing.load_tariff()
+    surcharges = load_surcharges()
+    regions = surcharges["demand"]["regions"]
+    return {
+        "meta": tariff["meta"],
+        "services": [{"id": key, "label": label, "premium_eur": tariff["export"]["premium"][key]}
+                     for key, label in dhl_pricing.SERVICES.items()],
+        "destinations": [{**entry, "demand_region": regions.get(entry["code"], "rest_of_world")}
+                         for entry in tariff["zones"]],
+        "surcharges": {
+            "fuel": surcharges["fuel"],
+            "demand": {key: value for key, value in surcharges["demand"].items() if key != "regions"},
+            "region_labels": REGION_LABELS,
+            "defaults": surcharges["defaults"],
+        },
+    }
+
+
+@app.get("/api/orders/{order_id}/shipping-quote")
+def get_order_shipping_quote(order_id: int) -> dict[str, Any]:
+    with connect() as db:
+        if not db.execute("SELECT 1 FROM orders WHERE id = ?", (order_id,)).fetchone():
+            raise HTTPException(404, "Order not found.")
+        plan = latest_plan(db, order_id)
+        quote = get_shipping_quote(db, order_id)
+        detected = _detect_order_destination(db, order_id)
+    return {
+        "quote": quote,
+        "stale": bool(quote and (not plan or quote["plan_id"] != plan["id"])),
+        "detected_destination": detected,
+    }
+
+
+@app.post("/api/orders/{order_id}/shipping-quote")
+def create_order_shipping_quote(order_id: int, payload: ShippingQuotePayload) -> dict[str, Any]:
+    inputs = payload.model_dump()
+    with connect() as db:
+        if not db.execute("SELECT 1 FROM orders WHERE id = ?", (order_id,)).fetchone():
+            raise HTTPException(404, "Order not found.")
+        plan = latest_plan(db, order_id)
+        boxes = (plan or {}).get("result", {}).get("boxes") or []
+        if not boxes:
+            raise HTTPException(422, "Analyze the order first: a packing plan with boxes is required for a DHL quote.")
+        try:
+            result = dhl_pricing.quote(boxes, inputs)
+        except dhl_pricing.PricingError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        quote = save_shipping_quote(db, order_id, plan["id"], inputs, result)
+    return {"quote": quote, "stale": False, "detected_destination": None}
+
+
 @app.get("/api/catalog/products")
 def list_products() -> list[dict[str, Any]]:
     with connect() as db:
@@ -1019,6 +1146,29 @@ def create_box(payload: BoxPayload) -> dict[str, Any]:
         except sqlite3.IntegrityError as exc:
             raise HTTPException(409, "This box code already exists.") from exc
         return dict(db.execute("SELECT * FROM box_types WHERE id = ?", (cursor.lastrowid,)).fetchone())
+
+
+@app.delete("/api/catalog/products/{product_id}")
+def delete_product(product_id: int) -> dict[str, Any]:
+    with connect() as db:
+        row = db.execute("SELECT name FROM products WHERE id = ?", (product_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Product not found.")
+        # Order lines keep their description and become unmatched; saved plans are snapshots.
+        db.execute("UPDATE order_items SET product_id = NULL WHERE product_id = ?", (product_id,))
+        db.execute("DELETE FROM products WHERE id = ?", (product_id,))
+    return {"deleted_product_id": product_id, "name": row["name"]}
+
+
+@app.delete("/api/catalog/boxes/{box_id}")
+def delete_box(box_id: int) -> dict[str, Any]:
+    with connect() as db:
+        row = db.execute("SELECT code FROM box_types WHERE id = ?", (box_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Box type not found.")
+        # Saved packing plans store their box dimensions, so they remain readable.
+        db.execute("DELETE FROM box_types WHERE id = ?", (box_id,))
+    return {"deleted_box_id": box_id, "code": row["code"]}
 
 
 def _upsert_product_record(db: sqlite3.Connection, record: dict[str, Any]) -> None:
@@ -1126,3 +1276,103 @@ async def import_catalog(catalog_type: str, file: UploadFile = File(...)) -> dic
             except sqlite3.DatabaseError as exc:
                 errors.append(f"Could not import {record}: {exc}")
     return {"imported": imported, "errors": errors}
+
+
+@app.get("/api/clients")
+def list_clients() -> list[dict[str, Any]]:
+    with connect() as db:
+        return rows_to_dicts(
+            db.execute("SELECT * FROM clients ORDER BY lower(customer)").fetchall()
+        )
+
+
+@app.post("/api/clients/import")
+async def import_clients(file: UploadFile = File(...)) -> dict[str, Any]:
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(400, "Upload an Excel .xlsx file.")
+    records, errors = parse_clients_excel(await file.read())
+    if not records and errors:
+        raise HTTPException(400, errors[0])
+    created = 0
+    updated = 0
+    with connect() as db:
+        for record in records:
+            timestamp = now_iso()
+            existing = db.execute(
+                "SELECT id FROM clients WHERE lower(trim(customer)) = lower(trim(?))",
+                (record["customer"],),
+            ).fetchone()
+            if existing:
+                db.execute(
+                    """UPDATE clients SET customer=?, phone_number=?, email=?, contact_name=?,
+                           address=?, country=?, shipping_address=?, updated_at=? WHERE id=?""",
+                    (record["customer"], record["phone_number"], record["email"],
+                     record["contact_name"], record["address"], record["country"],
+                     record["shipping_address"], timestamp, existing["id"]),
+                )
+                updated += 1
+            else:
+                db.execute(
+                    """INSERT INTO clients
+                           (customer, phone_number, email, contact_name, address, country,
+                            shipping_address, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (record["customer"], record["phone_number"], record["email"],
+                     record["contact_name"], record["address"], record["country"],
+                     record["shipping_address"], timestamp, timestamp),
+                )
+                created += 1
+    return {"imported": created + updated, "created": created, "updated": updated, "errors": errors}
+
+
+class ClientPayload(BaseModel):
+    customer: str = Field(min_length=1, max_length=300)
+    phone_number: str = Field(default="", max_length=100)
+    email: str = Field(default="", max_length=300)
+    contact_name: str = Field(default="", max_length=300)
+    address: str = Field(default="", max_length=2000)
+    country: str = Field(default="", max_length=120)
+    shipping_address: str = Field(default="", max_length=2000)
+
+
+def _client_or_404(db: sqlite3.Connection, client_id: int) -> sqlite3.Row:
+    row = db.execute("SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "Client not found.")
+    return row
+
+
+@app.patch("/api/clients/{client_id}")
+def update_client(client_id: int, payload: ClientPayload) -> dict[str, Any]:
+    values = {field: value.strip() for field, value in payload.model_dump().items()}
+    if not values["customer"]:
+        raise HTTPException(422, "Customer is required.")
+    with connect() as db:
+        _client_or_404(db, client_id)
+        try:
+            db.execute(
+                """UPDATE clients SET customer=?, phone_number=?, email=?, contact_name=?,
+                       address=?, country=?, shipping_address=?, updated_at=? WHERE id=?""",
+                (values["customer"], values["phone_number"], values["email"],
+                 values["contact_name"], values["address"], values["country"],
+                 values["shipping_address"], now_iso(), client_id),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(409, "Another client already uses this customer name.") from exc
+        return dict(_client_or_404(db, client_id))
+
+
+@app.delete("/api/clients")
+def delete_all_clients() -> dict[str, int]:
+    with connect() as db:
+        count = db.execute("SELECT COUNT(*) FROM clients").fetchone()[0]
+        db.execute("DELETE FROM clients")
+    return {"deleted_clients": count}
+
+
+@app.delete("/api/clients/{client_id}")
+def delete_client(client_id: int) -> dict[str, Any]:
+    with connect() as db:
+        row = _client_or_404(db, client_id)
+        db.execute("DELETE FROM clients WHERE id = ?", (client_id,))
+    return {"deleted_client_id": client_id, "customer": row["customer"]}

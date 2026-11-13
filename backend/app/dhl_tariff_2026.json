@@ -1,0 +1,1687 @@
+{
+ "meta": {
+  "source": "DHL 2026.xlsx (DHL Express Malta rate card, customer Thought3D Ltd)",
+  "version": "DHL-MT-2026",
+  "carrier": "DHL Express",
+  "origin": "MT",
+  "currency": "EUR",
+  "valid_to": "2026-12-31",
+  "volumetric_divisor": 5000,
+  "max_piece_kg": 300,
+  "max_piece_cm": 300,
+  "max_shipment_kg": 3000,
+  "notes": [
+   "Rates exclude VAT, fuel surcharge and other surcharges.",
+   "Fuel % and demand surcharge are published weekly on the DHL website and are not in the rate card."
+  ]
+ },
+ "export": {
+  "service": "Express Worldwide",
+  "non_documents": [
+   [
+    0.5,
+    18.68,
+    18.68,
+    24.18,
+    25.92,
+    27.55,
+    33.55
+   ],
+   [
+    1.0,
+    18.68,
+    18.68,
+    24.18,
+    25.92,
+    27.55,
+    33.55
+   ],
+   [
+    1.5,
+    19.39,
+    19.39,
+    24.9,
+    26.67,
+    28.28,
+    34.28
+   ],
+   [
+    2.0,
+    20.1,
+    20.1,
+    25.62,
+    27.42,
+    29.01,
+    35.01
+   ],
+   [
+    2.5,
+    20.85,
+    20.85,
+    26.36,
+    28.13,
+    29.73,
+    35.77
+   ],
+   [
+    3.0,
+    23.41,
+    23.41,
+    29.29,
+    31.06,
+    32.66,
+    38.7
+   ],
+   [
+    3.5,
+    25.97,
+    25.97,
+    32.22,
+    33.99,
+    35.59,
+    41.63
+   ],
+   [
+    4.0,
+    28.53,
+    28.53,
+    35.15,
+    36.92,
+    38.52,
+    44.56
+   ],
+   [
+    4.5,
+    31.09,
+    31.09,
+    38.08,
+    39.85,
+    41.45,
+    47.49
+   ],
+   [
+    5.0,
+    33.65,
+    33.65,
+    41.01,
+    42.78,
+    44.38,
+    50.42
+   ],
+   [
+    5.5,
+    36.23,
+    36.23,
+    43.94,
+    45.71,
+    47.3,
+    53.35
+   ],
+   [
+    6.0,
+    38.81,
+    38.81,
+    46.87,
+    48.64,
+    50.22,
+    56.28
+   ],
+   [
+    6.5,
+    41.39,
+    41.39,
+    49.8,
+    51.57,
+    53.14,
+    59.21
+   ],
+   [
+    7.0,
+    43.97,
+    43.97,
+    52.73,
+    54.5,
+    56.06,
+    62.14
+   ],
+   [
+    7.5,
+    46.55,
+    46.55,
+    55.66,
+    57.43,
+    58.98,
+    65.07
+   ],
+   [
+    8.0,
+    49.13,
+    49.13,
+    58.59,
+    60.36,
+    61.9,
+    68.0
+   ],
+   [
+    8.5,
+    51.71,
+    51.71,
+    61.52,
+    63.29,
+    64.82,
+    70.93
+   ],
+   [
+    9.0,
+    54.29,
+    54.29,
+    64.45,
+    66.22,
+    67.74,
+    73.86
+   ],
+   [
+    9.5,
+    56.87,
+    56.87,
+    67.38,
+    69.15,
+    70.66,
+    76.79
+   ],
+   [
+    10.0,
+    59.45,
+    59.45,
+    70.31,
+    72.08,
+    73.58,
+    79.72
+   ],
+   [
+    11.0,
+    66.77,
+    66.77,
+    79.09,
+    82.34,
+    85.36,
+    92.9
+   ],
+   [
+    12.0,
+    74.09,
+    74.09,
+    87.87,
+    92.6,
+    97.14,
+    106.08
+   ],
+   [
+    13.0,
+    81.41,
+    81.41,
+    96.65,
+    102.86,
+    108.92,
+    119.26
+   ],
+   [
+    14.0,
+    88.73,
+    88.73,
+    105.43,
+    113.12,
+    120.7,
+    132.44
+   ],
+   [
+    15.0,
+    96.05,
+    96.05,
+    114.21,
+    123.38,
+    132.48,
+    145.62
+   ],
+   [
+    16.0,
+    103.37,
+    103.37,
+    122.99,
+    133.64,
+    144.26,
+    158.8
+   ],
+   [
+    17.0,
+    110.69,
+    110.69,
+    131.77,
+    143.9,
+    156.04,
+    171.98
+   ],
+   [
+    18.0,
+    118.01,
+    118.01,
+    140.55,
+    154.16,
+    167.82,
+    185.16
+   ],
+   [
+    19.0,
+    125.33,
+    125.33,
+    149.33,
+    164.42,
+    179.6,
+    198.34
+   ],
+   [
+    20.0,
+    132.65,
+    132.65,
+    158.11,
+    174.68,
+    191.38,
+    211.52
+   ],
+   [
+    21.0,
+    138.51,
+    138.51,
+    163.97,
+    180.52,
+    197.22,
+    217.36
+   ],
+   [
+    22.0,
+    144.37,
+    144.37,
+    169.83,
+    186.36,
+    203.06,
+    223.2
+   ],
+   [
+    23.0,
+    150.23,
+    150.23,
+    175.69,
+    192.2,
+    208.9,
+    229.04
+   ],
+   [
+    24.0,
+    156.09,
+    156.09,
+    181.55,
+    198.04,
+    214.74,
+    234.88
+   ],
+   [
+    25.0,
+    161.95,
+    161.95,
+    187.41,
+    203.88,
+    220.58,
+    240.72
+   ],
+   [
+    26.0,
+    167.81,
+    167.81,
+    193.27,
+    209.72,
+    226.42,
+    246.56
+   ],
+   [
+    27.0,
+    173.67,
+    173.67,
+    199.13,
+    215.56,
+    232.26,
+    252.4
+   ],
+   [
+    28.0,
+    179.53,
+    179.53,
+    204.99,
+    221.4,
+    238.1,
+    258.24
+   ],
+   [
+    29.0,
+    185.39,
+    185.39,
+    210.85,
+    227.24,
+    243.94,
+    264.08
+   ],
+   [
+    30.0,
+    191.25,
+    191.25,
+    216.71,
+    233.08,
+    249.78,
+    269.92
+   ],
+   [
+    40.0,
+    249.95,
+    249.95,
+    289.91,
+    306.38,
+    323.08,
+    343.22
+   ],
+   [
+    50.0,
+    308.65,
+    308.65,
+    363.11,
+    379.68,
+    396.38,
+    416.52
+   ],
+   [
+    60.0,
+    367.35,
+    367.35,
+    436.31,
+    452.98,
+    469.68,
+    489.82
+   ],
+   [
+    70.0,
+    426.05,
+    426.05,
+    509.51,
+    526.28,
+    542.98,
+    563.12
+   ]
+  ],
+  "adders": [
+   {
+    "from_kg": 10.1,
+    "to_kg": 20.0,
+    "step_kg": 0.5,
+    "rates": [
+     3.66,
+     3.66,
+     4.39,
+     5.13,
+     5.89,
+     6.59
+    ]
+   },
+   {
+    "from_kg": 20.1,
+    "to_kg": 30.0,
+    "step_kg": 0.5,
+    "rates": [
+     2.93,
+     2.93,
+     2.93,
+     2.92,
+     2.92,
+     2.92
+    ]
+   },
+   {
+    "from_kg": 30.1,
+    "to_kg": 70.0,
+    "step_kg": 1.0,
+    "rates": [
+     5.87,
+     5.87,
+     7.32,
+     7.33,
+     7.33,
+     7.33
+    ]
+   },
+   {
+    "from_kg": 70.1,
+    "to_kg": 300.0,
+    "step_kg": 1.0,
+    "rates": [
+     7.33,
+     7.33,
+     8.8,
+     8.8,
+     8.8,
+     8.8
+    ]
+   },
+   {
+    "from_kg": 300.1,
+    "to_kg": 99999.0,
+    "step_kg": 1.0,
+    "rates": [
+     8.05,
+     8.05,
+     9.67,
+     9.67,
+     9.67,
+     9.67
+    ]
+   }
+  ],
+  "premium": {
+   "express_worldwide": 0.0,
+   "premium_1200": 10.0,
+   "premium_0900": 35.0
+  }
+ },
+ "zones": [
+  {
+   "code": "AF",
+   "name": "Afghanistan",
+   "zone": 6
+  },
+  {
+   "code": "AL",
+   "name": "Albania",
+   "zone": 3
+  },
+  {
+   "code": "DZ",
+   "name": "Algeria",
+   "zone": 5
+  },
+  {
+   "code": "AS",
+   "name": "American Samoa",
+   "zone": 6
+  },
+  {
+   "code": "AD",
+   "name": "Andorra",
+   "zone": 3
+  },
+  {
+   "code": "AO",
+   "name": "Angola",
+   "zone": 6
+  },
+  {
+   "code": "AI",
+   "name": "Anguilla",
+   "zone": 6
+  },
+  {
+   "code": "AG",
+   "name": "Antigua",
+   "zone": 6
+  },
+  {
+   "code": "AR",
+   "name": "Argentina",
+   "zone": 6
+  },
+  {
+   "code": "AM",
+   "name": "Armenia",
+   "zone": 6
+  },
+  {
+   "code": "AW",
+   "name": "Aruba",
+   "zone": 6
+  },
+  {
+   "code": "AU",
+   "name": "Australia",
+   "zone": 6
+  },
+  {
+   "code": "AT",
+   "name": "Austria",
+   "zone": 1
+  },
+  {
+   "code": "AZ",
+   "name": "Azerbaijan",
+   "zone": 6
+  },
+  {
+   "code": "BS",
+   "name": "Bahamas",
+   "zone": 6
+  },
+  {
+   "code": "BH",
+   "name": "Bahrain",
+   "zone": 5
+  },
+  {
+   "code": "BD",
+   "name": "Bangladesh",
+   "zone": 5
+  },
+  {
+   "code": "BB",
+   "name": "Barbados",
+   "zone": 6
+  },
+  {
+   "code": "BY",
+   "name": "Belarus",
+   "zone": 6
+  },
+  {
+   "code": "BE",
+   "name": "Belgium",
+   "zone": 1
+  },
+  {
+   "code": "BZ",
+   "name": "Belize",
+   "zone": 6
+  },
+  {
+   "code": "BJ",
+   "name": "Benin",
+   "zone": 6
+  },
+  {
+   "code": "BM",
+   "name": "Bermuda",
+   "zone": 6
+  },
+  {
+   "code": "BT",
+   "name": "Bhutan",
+   "zone": 6
+  },
+  {
+   "code": "BO",
+   "name": "Bolivia",
+   "zone": 6
+  },
+  {
+   "code": "XB",
+   "name": "Bonaire",
+   "zone": 6
+  },
+  {
+   "code": "BA",
+   "name": "Bosnia & Herzegovina",
+   "zone": 3
+  },
+  {
+   "code": "BW",
+   "name": "Botswana",
+   "zone": 6
+  },
+  {
+   "code": "BR",
+   "name": "Brazil",
+   "zone": 6
+  },
+  {
+   "code": "BN",
+   "name": "Brunei",
+   "zone": 5
+  },
+  {
+   "code": "BG",
+   "name": "Bulgaria",
+   "zone": 2
+  },
+  {
+   "code": "BF",
+   "name": "Burkina Faso",
+   "zone": 6
+  },
+  {
+   "code": "BI",
+   "name": "Burundi",
+   "zone": 6
+  },
+  {
+   "code": "KH",
+   "name": "Cambodia",
+   "zone": 5
+  },
+  {
+   "code": "CM",
+   "name": "Cameroon",
+   "zone": 6
+  },
+  {
+   "code": "CA",
+   "name": "Canada",
+   "zone": 4
+  },
+  {
+   "code": "IC",
+   "name": "Canary Islands, The",
+   "zone": 3
+  },
+  {
+   "code": "CV",
+   "name": "Cape Verde",
+   "zone": 6
+  },
+  {
+   "code": "KY",
+   "name": "Cayman Islands",
+   "zone": 6
+  },
+  {
+   "code": "CF",
+   "name": "Central African Rep",
+   "zone": 6
+  },
+  {
+   "code": "TD",
+   "name": "Chad",
+   "zone": 6
+  },
+  {
+   "code": "CL",
+   "name": "Chile",
+   "zone": 6
+  },
+  {
+   "code": "CN",
+   "name": "China",
+   "zone": 5
+  },
+  {
+   "code": "CO",
+   "name": "Colombia",
+   "zone": 6
+  },
+  {
+   "code": "KM",
+   "name": "Comoros",
+   "zone": 6
+  },
+  {
+   "code": "CG",
+   "name": "Congo",
+   "zone": 6
+  },
+  {
+   "code": "CD",
+   "name": "Congo, DPR",
+   "zone": 6
+  },
+  {
+   "code": "CK",
+   "name": "Cook Islands",
+   "zone": 6
+  },
+  {
+   "code": "CR",
+   "name": "Costa Rica",
+   "zone": 6
+  },
+  {
+   "code": "CI",
+   "name": "Cote D Ivoire",
+   "zone": 6
+  },
+  {
+   "code": "HR",
+   "name": "Croatia",
+   "zone": 2
+  },
+  {
+   "code": "CU",
+   "name": "Cuba",
+   "zone": 6
+  },
+  {
+   "code": "XC",
+   "name": "Curacao",
+   "zone": 6
+  },
+  {
+   "code": "CY",
+   "name": "Cyprus",
+   "zone": 1
+  },
+  {
+   "code": "CZ",
+   "name": "Czech Rep., The",
+   "zone": 2
+  },
+  {
+   "code": "DK",
+   "name": "Denmark",
+   "zone": 2
+  },
+  {
+   "code": "DJ",
+   "name": "Djibouti",
+   "zone": 6
+  },
+  {
+   "code": "DM",
+   "name": "Dominica",
+   "zone": 6
+  },
+  {
+   "code": "DO",
+   "name": "Dominican Rep.",
+   "zone": 6
+  },
+  {
+   "code": "EC",
+   "name": "Ecuador",
+   "zone": 6
+  },
+  {
+   "code": "EG",
+   "name": "Egypt",
+   "zone": 5
+  },
+  {
+   "code": "SV",
+   "name": "El Salvador",
+   "zone": 6
+  },
+  {
+   "code": "ER",
+   "name": "Eritrea",
+   "zone": 6
+  },
+  {
+   "code": "EE",
+   "name": "Estonia",
+   "zone": 2
+  },
+  {
+   "code": "SZ",
+   "name": "Eswatini",
+   "zone": 6
+  },
+  {
+   "code": "ET",
+   "name": "Ethiopia",
+   "zone": 6
+  },
+  {
+   "code": "FK",
+   "name": "Falkland Islands",
+   "zone": 6
+  },
+  {
+   "code": "FO",
+   "name": "Faroe Islands",
+   "zone": 6
+  },
+  {
+   "code": "FJ",
+   "name": "Fiji",
+   "zone": 6
+  },
+  {
+   "code": "FI",
+   "name": "Finland",
+   "zone": 2
+  },
+  {
+   "code": "FR",
+   "name": "France",
+   "zone": 1
+  },
+  {
+   "code": "GF",
+   "name": "French Guyana",
+   "zone": 6
+  },
+  {
+   "code": "GA",
+   "name": "Gabon",
+   "zone": 6
+  },
+  {
+   "code": "GM",
+   "name": "Gambia",
+   "zone": 6
+  },
+  {
+   "code": "GE",
+   "name": "Georgia",
+   "zone": 6
+  },
+  {
+   "code": "DE",
+   "name": "Germany",
+   "zone": 1
+  },
+  {
+   "code": "GH",
+   "name": "Ghana",
+   "zone": 6
+  },
+  {
+   "code": "GI",
+   "name": "Gibraltar",
+   "zone": 3
+  },
+  {
+   "code": "GR",
+   "name": "Greece",
+   "zone": 1
+  },
+  {
+   "code": "GL",
+   "name": "Greenland",
+   "zone": 6
+  },
+  {
+   "code": "GD",
+   "name": "Grenada",
+   "zone": 6
+  },
+  {
+   "code": "GP",
+   "name": "Guadeloupe",
+   "zone": 6
+  },
+  {
+   "code": "GU",
+   "name": "Guam",
+   "zone": 6
+  },
+  {
+   "code": "GT",
+   "name": "Guatemala",
+   "zone": 6
+  },
+  {
+   "code": "GG",
+   "name": "Guernsey",
+   "zone": 3
+  },
+  {
+   "code": "GN",
+   "name": "Guinea Rep.",
+   "zone": 6
+  },
+  {
+   "code": "GW",
+   "name": "Guinea-Bissau",
+   "zone": 6
+  },
+  {
+   "code": "GQ",
+   "name": "Guinea-Equatorial",
+   "zone": 6
+  },
+  {
+   "code": "GY",
+   "name": "Guyana (British)",
+   "zone": 6
+  },
+  {
+   "code": "HT",
+   "name": "Haiti",
+   "zone": 6
+  },
+  {
+   "code": "HN",
+   "name": "Honduras",
+   "zone": 6
+  },
+  {
+   "code": "HK",
+   "name": "Hong Kong SAR China",
+   "zone": 5
+  },
+  {
+   "code": "HU",
+   "name": "Hungary",
+   "zone": 2
+  },
+  {
+   "code": "IS",
+   "name": "Iceland",
+   "zone": 3
+  },
+  {
+   "code": "IN",
+   "name": "India",
+   "zone": 5
+  },
+  {
+   "code": "ID",
+   "name": "Indonesia",
+   "zone": 5
+  },
+  {
+   "code": "IR",
+   "name": "Iran",
+   "zone": 5
+  },
+  {
+   "code": "IQ",
+   "name": "Iraq",
+   "zone": 5
+  },
+  {
+   "code": "IE",
+   "name": "Ireland, Rep. Of",
+   "zone": 2
+  },
+  {
+   "code": "IL",
+   "name": "Israel",
+   "zone": 5
+  },
+  {
+   "code": "IT",
+   "name": "Italy",
+   "zone": 1
+  },
+  {
+   "code": "JM",
+   "name": "Jamaica",
+   "zone": 6
+  },
+  {
+   "code": "JP",
+   "name": "Japan",
+   "zone": 5
+  },
+  {
+   "code": "JE",
+   "name": "Jersey",
+   "zone": 3
+  },
+  {
+   "code": "JO",
+   "name": "Jordan",
+   "zone": 5
+  },
+  {
+   "code": "KZ",
+   "name": "Kazakhstan",
+   "zone": 5
+  },
+  {
+   "code": "KE",
+   "name": "Kenya",
+   "zone": 6
+  },
+  {
+   "code": "KI",
+   "name": "Kiribati",
+   "zone": 6
+  },
+  {
+   "code": "KP",
+   "name": "Korea,  D.P.R Of",
+   "zone": 5
+  },
+  {
+   "code": "KR",
+   "name": "Korea, Rep. Of",
+   "zone": 5
+  },
+  {
+   "code": "KV",
+   "name": "Kosovo",
+   "zone": 3
+  },
+  {
+   "code": "KW",
+   "name": "Kuwait",
+   "zone": 5
+  },
+  {
+   "code": "KG",
+   "name": "Kyrgyzstan",
+   "zone": 6
+  },
+  {
+   "code": "LA",
+   "name": "Laos",
+   "zone": 5
+  },
+  {
+   "code": "LV",
+   "name": "Latvia",
+   "zone": 2
+  },
+  {
+   "code": "LB",
+   "name": "Lebanon",
+   "zone": 5
+  },
+  {
+   "code": "LS",
+   "name": "Lesotho",
+   "zone": 6
+  },
+  {
+   "code": "LR",
+   "name": "Liberia",
+   "zone": 6
+  },
+  {
+   "code": "LY",
+   "name": "Libya",
+   "zone": 5
+  },
+  {
+   "code": "LI",
+   "name": "Liechtenstein",
+   "zone": 3
+  },
+  {
+   "code": "LT",
+   "name": "Lithuania",
+   "zone": 2
+  },
+  {
+   "code": "LU",
+   "name": "Luxembourg",
+   "zone": 1
+  },
+  {
+   "code": "MO",
+   "name": "Macau SAR China",
+   "zone": 6
+  },
+  {
+   "code": "MG",
+   "name": "Madagascar",
+   "zone": 6
+  },
+  {
+   "code": "MW",
+   "name": "Malawi",
+   "zone": 6
+  },
+  {
+   "code": "MY",
+   "name": "Malaysia",
+   "zone": 5
+  },
+  {
+   "code": "MV",
+   "name": "Maldives",
+   "zone": 6
+  },
+  {
+   "code": "ML",
+   "name": "Mali",
+   "zone": 6
+  },
+  {
+   "code": "MH",
+   "name": "Marshall Islands",
+   "zone": 6
+  },
+  {
+   "code": "MQ",
+   "name": "Martinique",
+   "zone": 6
+  },
+  {
+   "code": "MR",
+   "name": "Mauritania",
+   "zone": 6
+  },
+  {
+   "code": "MU",
+   "name": "Mauritius",
+   "zone": 6
+  },
+  {
+   "code": "YT",
+   "name": "Mayotte",
+   "zone": 6
+  },
+  {
+   "code": "MX",
+   "name": "Mexico",
+   "zone": 4
+  },
+  {
+   "code": "FM",
+   "name": "Micronesia",
+   "zone": 6
+  },
+  {
+   "code": "MD",
+   "name": "Moldova, Rep. Of",
+   "zone": 6
+  },
+  {
+   "code": "MC",
+   "name": "Monaco",
+   "zone": 1
+  },
+  {
+   "code": "MN",
+   "name": "Mongolia",
+   "zone": 6
+  },
+  {
+   "code": "ME",
+   "name": "Montenegro, Rep Of",
+   "zone": 3
+  },
+  {
+   "code": "MS",
+   "name": "Montserrat",
+   "zone": 6
+  },
+  {
+   "code": "MA",
+   "name": "Morocco",
+   "zone": 5
+  },
+  {
+   "code": "MZ",
+   "name": "Mozambique",
+   "zone": 6
+  },
+  {
+   "code": "MM",
+   "name": "Myanmar",
+   "zone": 5
+  },
+  {
+   "code": "NA",
+   "name": "Namibia",
+   "zone": 6
+  },
+  {
+   "code": "NR",
+   "name": "Nauru, Rep. Of",
+   "zone": 6
+  },
+  {
+   "code": "NP",
+   "name": "Nepal",
+   "zone": 5
+  },
+  {
+   "code": "NL",
+   "name": "Netherlands, The",
+   "zone": 1
+  },
+  {
+   "code": "XN",
+   "name": "Nevis",
+   "zone": 6
+  },
+  {
+   "code": "NC",
+   "name": "New Caledonia",
+   "zone": 6
+  },
+  {
+   "code": "NZ",
+   "name": "New Zealand",
+   "zone": 6
+  },
+  {
+   "code": "NI",
+   "name": "Nicaragua",
+   "zone": 6
+  },
+  {
+   "code": "NE",
+   "name": "Niger",
+   "zone": 6
+  },
+  {
+   "code": "NG",
+   "name": "Nigeria",
+   "zone": 6
+  },
+  {
+   "code": "NU",
+   "name": "Niue",
+   "zone": 6
+  },
+  {
+   "code": "MK",
+   "name": "North Macedonia",
+   "zone": 3
+  },
+  {
+   "code": "MP",
+   "name": "Northern Mariana Islands",
+   "zone": 6
+  },
+  {
+   "code": "NO",
+   "name": "Norway",
+   "zone": 3
+  },
+  {
+   "code": "OM",
+   "name": "Oman",
+   "zone": 5
+  },
+  {
+   "code": "PK",
+   "name": "Pakistan",
+   "zone": 6
+  },
+  {
+   "code": "PW",
+   "name": "Palau",
+   "zone": 6
+  },
+  {
+   "code": "PA",
+   "name": "Panama",
+   "zone": 6
+  },
+  {
+   "code": "PG",
+   "name": "Papua New Guinea",
+   "zone": 6
+  },
+  {
+   "code": "PY",
+   "name": "Paraguay",
+   "zone": 6
+  },
+  {
+   "code": "PE",
+   "name": "Peru",
+   "zone": 6
+  },
+  {
+   "code": "PH",
+   "name": "Philippines, The",
+   "zone": 5
+  },
+  {
+   "code": "PL",
+   "name": "Poland",
+   "zone": 2
+  },
+  {
+   "code": "PT",
+   "name": "Portugal",
+   "zone": 2
+  },
+  {
+   "code": "PR",
+   "name": "Puerto Rico",
+   "zone": 6
+  },
+  {
+   "code": "QA",
+   "name": "Qatar",
+   "zone": 5
+  },
+  {
+   "code": "RE",
+   "name": "Reunion, Island Of",
+   "zone": 6
+  },
+  {
+   "code": "RO",
+   "name": "Romania",
+   "zone": 2
+  },
+  {
+   "code": "RU",
+   "name": "Russian Federation",
+   "zone": 6
+  },
+  {
+   "code": "RW",
+   "name": "Rwanda",
+   "zone": 6
+  },
+  {
+   "code": "SH",
+   "name": "Saint Helena",
+   "zone": 6
+  },
+  {
+   "code": "WS",
+   "name": "Samoa",
+   "zone": 6
+  },
+  {
+   "code": "SM",
+   "name": "San Marino",
+   "zone": 1
+  },
+  {
+   "code": "ST",
+   "name": "Sao Tome And Principe",
+   "zone": 6
+  },
+  {
+   "code": "SA",
+   "name": "Saudi Arabia",
+   "zone": 5
+  },
+  {
+   "code": "SN",
+   "name": "Senegal",
+   "zone": 6
+  },
+  {
+   "code": "RS",
+   "name": "Serbia, Rep. Of",
+   "zone": 3
+  },
+  {
+   "code": "SC",
+   "name": "Seychelles",
+   "zone": 6
+  },
+  {
+   "code": "SL",
+   "name": "Sierra Leone",
+   "zone": 6
+  },
+  {
+   "code": "SG",
+   "name": "Singapore",
+   "zone": 5
+  },
+  {
+   "code": "SK",
+   "name": "Slovakia",
+   "zone": 2
+  },
+  {
+   "code": "SI",
+   "name": "Slovenia",
+   "zone": 2
+  },
+  {
+   "code": "SB",
+   "name": "Solomon Islands",
+   "zone": 6
+  },
+  {
+   "code": "XS",
+   "name": "Somalia Hargeisa",
+   "zone": 6
+  },
+  {
+   "code": "SO",
+   "name": "Somalia Mogadishu",
+   "zone": 6
+  },
+  {
+   "code": "ZA",
+   "name": "South Africa",
+   "zone": 6
+  },
+  {
+   "code": "SS",
+   "name": "South Sudan",
+   "zone": 6
+  },
+  {
+   "code": "ES",
+   "name": "Spain",
+   "zone": 2
+  },
+  {
+   "code": "LK",
+   "name": "Sri Lanka",
+   "zone": 6
+  },
+  {
+   "code": "XY",
+   "name": "St. Barthelemy",
+   "zone": 6
+  },
+  {
+   "code": "XE",
+   "name": "St. Eustatius",
+   "zone": 6
+  },
+  {
+   "code": "KN",
+   "name": "St. Kitts",
+   "zone": 6
+  },
+  {
+   "code": "LC",
+   "name": "St. Lucia",
+   "zone": 6
+  },
+  {
+   "code": "XM",
+   "name": "St. Maarten",
+   "zone": 6
+  },
+  {
+   "code": "VC",
+   "name": "St. Vincent",
+   "zone": 6
+  },
+  {
+   "code": "SD",
+   "name": "Sudan",
+   "zone": 6
+  },
+  {
+   "code": "SR",
+   "name": "Suriname",
+   "zone": 6
+  },
+  {
+   "code": "SE",
+   "name": "Sweden",
+   "zone": 2
+  },
+  {
+   "code": "CH",
+   "name": "Switzerland",
+   "zone": 3
+  },
+  {
+   "code": "SY",
+   "name": "Syria",
+   "zone": 5
+  },
+  {
+   "code": "PF",
+   "name": "Tahiti",
+   "zone": 6
+  },
+  {
+   "code": "TW",
+   "name": "Taiwan",
+   "zone": 5
+  },
+  {
+   "code": "TJ",
+   "name": "Tajikistan",
+   "zone": 6
+  },
+  {
+   "code": "TZ",
+   "name": "Tanzania",
+   "zone": 6
+  },
+  {
+   "code": "TH",
+   "name": "Thailand",
+   "zone": 5
+  },
+  {
+   "code": "TL",
+   "name": "Timor-Leste",
+   "zone": 6
+  },
+  {
+   "code": "TG",
+   "name": "Togo",
+   "zone": 6
+  },
+  {
+   "code": "TO",
+   "name": "Tonga",
+   "zone": 6
+  },
+  {
+   "code": "TT",
+   "name": "Trinidad And Tobago",
+   "zone": 6
+  },
+  {
+   "code": "TN",
+   "name": "Tunisia",
+   "zone": 5
+  },
+  {
+   "code": "TR",
+   "name": "Turkey",
+   "zone": 3
+  },
+  {
+   "code": "TM",
+   "name": "Turkmenistan",
+   "zone": 6
+  },
+  {
+   "code": "TC",
+   "name": "Turks & Caicos",
+   "zone": 6
+  },
+  {
+   "code": "TV",
+   "name": "Tuvalu",
+   "zone": 6
+  },
+  {
+   "code": "US",
+   "name": "USA",
+   "zone": 4
+  },
+  {
+   "code": "UG",
+   "name": "Uganda",
+   "zone": 6
+  },
+  {
+   "code": "UA",
+   "name": "Ukraine",
+   "zone": 3
+  },
+  {
+   "code": "AE",
+   "name": "United Arab Emirates",
+   "zone": 5
+  },
+  {
+   "code": "GB-SA",
+   "name": "United Kingdom (listed service areas: LON, MAN, GLA, EDI…)",
+   "zone": 3
+  },
+  {
+   "code": "GB",
+   "name": "United Kingdom (rest of UK)",
+   "zone": 1
+  },
+  {
+   "code": "UY",
+   "name": "Uruguay",
+   "zone": 6
+  },
+  {
+   "code": "UZ",
+   "name": "Uzbekistan",
+   "zone": 6
+  },
+  {
+   "code": "VU",
+   "name": "Vanuatu",
+   "zone": 6
+  },
+  {
+   "code": "VA",
+   "name": "Vatican City",
+   "zone": 1
+  },
+  {
+   "code": "VE",
+   "name": "Venezuela",
+   "zone": 6
+  },
+  {
+   "code": "VN",
+   "name": "Vietnam",
+   "zone": 5
+  },
+  {
+   "code": "VG",
+   "name": "Virgin Islands-British",
+   "zone": 6
+  },
+  {
+   "code": "VI",
+   "name": "Virgin Islands-US",
+   "zone": 6
+  },
+  {
+   "code": "YE",
+   "name": "Yemen, Rep. Of",
+   "zone": 5
+  },
+  {
+   "code": "ZM",
+   "name": "Zambia",
+   "zone": 6
+  },
+  {
+   "code": "ZW",
+   "name": "Zimbabwe",
+   "zone": 6
+  }
+ ],
+ "surcharges": {
+  "oversize_piece": {
+   "amount": 20.0,
+   "longest_side_cm": 100,
+   "second_side_cm": 80
+  },
+  "overweight_piece": {
+   "amount": 100.0,
+   "over_kg": 70
+  },
+  "non_conveyable_piece": {
+   "amount": 20.0,
+   "from_kg": 25,
+   "to_kg": 70
+  },
+  "remote_area_delivery": {
+   "per_kg": 0.5,
+   "minimum": 24.0
+  },
+  "gogreen_plus": {
+   "per_kg": 0.2,
+   "waived_in_rate_card": true
+  }
+ }
+}

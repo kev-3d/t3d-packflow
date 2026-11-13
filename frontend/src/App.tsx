@@ -6,6 +6,7 @@ import { Shell } from './components/Shell'
 import { DeleteOrdersDialog } from './components/DeleteOrdersDialog'
 import { UploadModal } from './components/UploadModal'
 import { Catalog } from './pages/Catalog'
+import { Clients } from './pages/Clients'
 import { Dashboard } from './pages/Dashboard'
 import { OrderDetail } from './pages/OrderDetail'
 import { Orders } from './pages/Orders'
@@ -24,6 +25,7 @@ function App() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [orderToDelete, setOrderToDelete] = useState<OrderSummary | null>(null)
   const [notice, setNotice] = useState<{ message: string; error?: boolean } | null>(null)
 
   const focusedRoute = useRef('')
@@ -107,6 +109,23 @@ function App() {
 
   const showDeleteOrders = () => { setDeleteError(''); setDeleteOpen(true) }
 
+  const deleteSingleOrder = async () => {
+    if (!orderToDelete) return
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await api.deleteOrder(orderToDelete.id)
+      if (order?.id === orderToDelete.id) setOrder(null)
+      await loadOverview()
+      notify(`Order ${orderToDelete.order_number} deleted.`)
+      setOrderToDelete(null)
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'The order could not be deleted. Please try again.')
+    } finally { setDeleting(false) }
+  }
+
+  const showDeleteOrder = (target: OrderSummary) => { setDeleteError(''); setOrderToDelete(target) }
+
   const navigate = (next: Page) => {
     if (next !== 'order') setPage(next)
   }
@@ -119,14 +138,16 @@ function App() {
         <>
           {page === 'dashboard' && !dashboard && connectionError && <div className="connection-error"><AlertCircle size={36} /><h1>We could not load your workspace</h1><p>Check that the server is available and try again.</p><Button className="button button--accent" onClick={() => window.location.reload()}>Try again</Button></div>}
           {page === 'dashboard' && dashboard && <Dashboard onViewOrders={() => navigate('orders')} data={dashboard} onOpenOrder={openOrder} onUpload={() => setUploadOpen(true)} />}
-          {page === 'orders' && <Orders orders={orders} onDeleteAll={showDeleteOrders} onOpen={openOrder} />}
+          {page === 'orders' && <Orders orders={orders} onDeleteAll={showDeleteOrders} onDelete={showDeleteOrder} onOpen={openOrder} />}
           {page === 'catalog' && <Catalog products={products} boxes={boxes} onRefresh={loadCatalog} notify={notify} />}
+          {page === 'clients' && <Clients notify={notify} />}
           {page === 'order' && order && <OrderDetail order={order} onBack={() => setPage('orders')} onRefresh={refreshCurrentOrder} onSaved={finishPackingPlan} notify={notify} />}
         </>
       )}
       {loading && dashboard && <div className="route-loader" role="status" aria-label="Loading order"><LoaderCircle className="spin" /></div>}
       {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} onComplete={(created) => { setUploadOpen(false); setOrder(created); setPage('order'); window.scrollTo({ top: 0, behavior: 'smooth' }); loadOverview().catch(() => notify('The order was created, but the overview could not be refreshed.', true)); notify(created.source_type === 'email' ? 'Email processed. Review the products and quantities before calculating.' : created.source_type === 'manual' ? 'Order created. Complete the review before calculating.' : 'PDF processed. Review the extracted details.')}} />}
       {deleteOpen && <DeleteOrdersDialog count={orders.length} busy={deleting} error={deleteError} onClose={() => setDeleteOpen(false)} onConfirm={deleteOrders} />}
+      {orderToDelete && <DeleteOrdersDialog count={1} order={orderToDelete} busy={deleting} error={deleteError} onClose={() => setOrderToDelete(null)} onConfirm={deleteSingleOrder} />}
       {notice && <div role={notice.error ? 'alert' : 'status'} className={`toast ${notice.error ? 'toast--error' : ''}`}>{notice.error ? <AlertCircle size={18} /> : <CheckCircle2 size={18} />}<span>{notice.message}</span><button aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={15} /></button></div>}
     </Shell>
   )

@@ -1,4 +1,4 @@
-export type Page = 'dashboard' | 'orders' | 'catalog' | 'order'
+export type Page = 'dashboard' | 'orders' | 'catalog' | 'clients' | 'order'
 
 export interface OrderSummary {
   id: number
@@ -45,6 +45,10 @@ export interface OrderItem {
   is_suggested?: number
   product_id?: number | null
   product_name?: string
+  /** SKU as written on the purchase order. */
+  sku_raw?: string | null
+  /** SKU of the matched catalog product. */
+  sku?: string | null
   weight_kg?: number
   length_cm?: number
   width_cm?: number
@@ -67,6 +71,7 @@ export interface PackedBox {
   dimensions_cm: [number, number, number]
   utilization: number
   product_weight_kg: number
+  empty_weight_kg?: number
   gross_weight_kg: number
   max_weight_kg: number
   remaining_volume_l: number
@@ -165,3 +170,97 @@ export interface BoxType {
   active: number
 }
 
+
+export interface Client {
+  id: number
+  customer: string
+  phone_number: string
+  email: string
+  contact_name: string
+  address: string
+  country: string
+  shipping_address: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ClientImportResult { imported: number; created: number; updated: number; errors: string[] }
+
+export type ClientInput = Pick<Client, 'customer' | 'phone_number' | 'email' | 'contact_name' | 'address' | 'country' | 'shipping_address'>
+
+export type DhlServiceId = 'express_worldwide' | 'premium_1200' | 'premium_0900'
+/** 'dhl' = DHL's published weekly fuel / demand schedule. 'saved' is the legacy name of 'dhl'. */
+export type DhlRateSource = 'dhl' | 'manual' | 'saved'
+export type DemandRegion = 'china_hk' | 'asia' | 'oceania' | 'europe' | 'americas' | 'mena' | 'rest_of_world'
+
+export interface DhlDestination { code: string; name: string; zone: number; demand_region?: DemandRegion }
+export interface DetectedDestination extends DhlDestination { source: string }
+
+export interface DhlFuelWeek { from: string; to: string; pct: number }
+
+export interface DhlSurcharges {
+  fuel: { service?: string; source?: string; imported_on?: string; weeks: DhlFuelWeek[] }
+  demand: { valid_from: string; valid_to: string; origin_region: string; rates: Record<DemandRegion, number>; source?: string; imported_on?: string }
+  region_labels: Record<DemandRegion, string>
+  defaults: { vat_pct: number; gogreen_per_kg: number }
+}
+
+export interface DhlConfig {
+  meta: { version: string; currency: string; origin: string; valid_to: string; volumetric_divisor: number; notes: string[] }
+  services: { id: DhlServiceId; label: string; premium_eur: number }[]
+  destinations: DhlDestination[]
+  surcharges: DhlSurcharges
+}
+
+export interface ShippingQuoteInputs {
+  destination: string
+  shipment_date: string
+  service: DhlServiceId
+  fuel_source: DhlRateSource
+  fuel_pct: number | null
+  demand_source: DhlRateSource
+  demand_per_kg: number | null
+  gogreen_per_kg: number | null
+  vat_pct: number | null
+  remote_area: boolean
+  other_eur: number
+}
+
+export interface ShippingQuoteResult {
+  tariff_version: string
+  currency: string
+  destination: DhlDestination
+  service: DhlServiceId
+  service_label: string
+  shipment_date: string
+  pieces: {
+    sequence: number
+    box_code: string | null
+    box_name: string | null
+    dimensions_cm: number[]
+    actual_kg: number
+    volumetric_kg: number
+    chargeable_kg: number
+    handling: { type: string; label: string; amount: number }
+  }[]
+  actual_kg: number
+  volumetric_kg: number
+  chargeable_kg: number
+  tariff_weight_kg: number
+  rates: { fuel_pct: number; fuel_source: DhlRateSource; fuel_note?: string; demand_per_kg: number; demand_source: DhlRateSource; demand_note?: string; gogreen_per_kg: number; vat_pct: number }
+  lines: { key: string; label: string; amount: number }[]
+  subtotal: number
+  vat: number
+  total: number
+}
+
+export interface SavedShippingQuote {
+  order_id: number
+  plan_id: number | null
+  inputs: ShippingQuoteInputs
+  result: ShippingQuoteResult
+  tariff_version: string
+  created_at: string
+}
+
+export interface ShippingQuoteResponse { quote: SavedShippingQuote | null; stale: boolean; detected_destination: DetectedDestination | null }
