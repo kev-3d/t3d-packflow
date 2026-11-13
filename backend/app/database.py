@@ -150,6 +150,22 @@ def init_db() -> None:
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_customer ON clients(lower(trim(customer)));
+            CREATE TABLE IF NOT EXISTS client_requirements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company TEXT NOT NULL,
+                company_key TEXT NOT NULL UNIQUE,
+                aliases TEXT NOT NULL DEFAULT '',
+                client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+                invoice_email TEXT NOT NULL DEFAULT '',
+                payment TEXT NOT NULL DEFAULT '',
+                pricing_requirements TEXT NOT NULL DEFAULT '',
+                docs_required TEXT NOT NULL DEFAULT '',
+                courier TEXT NOT NULL DEFAULT '',
+                comments TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
             CREATE INDEX IF NOT EXISTS idx_plans_order ON packing_plans(order_id, id DESC);
             """

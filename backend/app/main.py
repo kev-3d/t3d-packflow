@@ -30,6 +30,7 @@ from .extraction import (
     extract_email, extract_pdf, parse_catalog_excel, parse_clients_excel, parse_reference_workbook,
 )
 from .packing import fill_existing_plan, pack_order
+from .requirements_routes import requirements_note_for, router as requirements_router
 from .labels import render_box_labels_pdf
 from .reports import render_analysis_pdf
 from .shipping_docs import DEFAULT_EXPORTER, build_shipment, render_packing_list_pdf
@@ -398,6 +399,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(requirements_router)
 
 
 @app.get("/api/health")
@@ -506,6 +508,7 @@ def get_order(order_id: int) -> dict[str, Any]:
         )
         order["source_available"] = bool(db.execute("SELECT 1 FROM source_documents WHERE order_id = ?", (order_id,)).fetchone())
         order["plan"] = latest_plan(db, order_id)
+        order["client_requirements"] = requirements_note_for(db, order["client"])
         return order
 
 

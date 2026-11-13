@@ -12,6 +12,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Bind mounts from Windows/macOS hosts don't emit file events inside Docker.
+    watch: process.env.VITE_USE_POLLING === 'true' ? { usePolling: true, interval: 300 } : undefined,
     proxy: {
       '/api': process.env.PACKFLOW_API_PROXY || 'http://127.0.0.1:8001',
     },

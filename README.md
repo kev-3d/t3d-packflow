@@ -175,6 +175,15 @@ overview and purchase orders pages, with explicit confirmation before deletion.
 in a single transaction. It returns `deleted_orders` and preserves products and
 boxes. Demo orders are not recreated on restart after deletion.
 
+## Run with Docker
+
+```bash
+docker compose up -d --build                  # production-like, http://localhost:10000
+docker compose -f compose.dev.yml up --build  # hot reload, http://localhost:5173
+```
+
+Data persists in a named volume. See the [Docker guide](docs/DOCKER.md).
+
 ## Publish a free demo
 
 The complete app is ready to deploy as a single Docker service on Render Free.

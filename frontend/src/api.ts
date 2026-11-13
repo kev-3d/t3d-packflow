@@ -1,5 +1,5 @@
 import type { RecommendationPreview } from './workflow'
-import type { AnalysisReport, BoxType, Client, ClientImportResult, ClientInput, DashboardData, DhlConfig, OrderDetailData, OrderSummary, Product, ShippingQuoteInputs, ShippingQuoteResponse } from './types'
+import type { AnalysisReport, BoxType, Client, ClientImportResult, ClientInput, ClientRequirement, ClientRequirementInput, ClientRequirementsImportResult, DashboardData, DhlConfig, OrderDetailData, OrderSummary, Product, ShippingQuoteInputs, ShippingQuoteResponse } from './types'
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number, public readonly details: unknown) { super(message); this.name = 'ApiError' }
@@ -144,6 +144,16 @@ export const api = {
     request<Client>(`/clients/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   deleteClient: (id: number) => request<{ deleted_client_id: number; customer: string }>(`/clients/${id}`, { method: 'DELETE' }),
   deleteAllClients: () => request<{ deleted_clients: number }>('/clients', { method: 'DELETE' }),
+  clientRequirements: () => request<ClientRequirement[]>('/client-requirements'),
+  importClientRequirements: (file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request<ClientRequirementsImportResult>('/client-requirements/import', { method: 'POST', body })
+  },
+  updateClientRequirement: (id: number, payload: ClientRequirementInput) =>
+    request<ClientRequirement>(`/client-requirements/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  deleteClientRequirement: (id: number) => request<{ deleted_requirement_id: number; company: string }>(`/client-requirements/${id}`, { method: 'DELETE' }),
+  deleteAllClientRequirements: () => request<{ deleted_requirements: number }>('/client-requirements', { method: 'DELETE' }),
   dhlConfig: () => request<DhlConfig>('/shipping/dhl'),
   shippingQuote: (orderId: number) => request<ShippingQuoteResponse>(`/orders/${orderId}/shipping-quote`),
   saveShippingQuote: (orderId: number, payload: ShippingQuoteInputs) =>

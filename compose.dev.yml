@@ -1,0 +1,47 @@
+# Development stack with hot reload (API + Vite), mirroring the two-server workflow.
+#   docker compose -f compose.dev.yml up --build
+#   Frontend: http://localhost:5173   API: http://localhost:8001/api/health
+# Source is bind-mounted; edits on the host reload automatically.
+name: packflow-dev
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend-dev
+    environment:
+      PACKFLOW_DB_PATH: /app/data/packflow.db
+      PACKFLOW_SEED_REFERENCE_CATALOG: "${PACKFLOW_SEED_REFERENCE_CATALOG:-false}"
+    ports:
+      - "${PACKFLOW_API_PORT:-8001}:8001"
+    volumes:
+      - ./backend/app:/app/backend/app
+      - packflow-dev-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/api/health', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend-dev
+    environment:
+      PACKFLOW_API_PROXY: http://api:8001
+      VITE_USE_POLLING: "true"
+    ports:
+      - "${PACKFLOW_WEB_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/build/frontend
+      # Keep the Linux node_modules from the image instead of the host's.
+      - /build/frontend/node_modules
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  packflow-dev-data:

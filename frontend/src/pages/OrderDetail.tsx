@@ -5,6 +5,7 @@ import { AlertTriangle, ArrowLeft, Box, Check, ChevronDown, Download, FileCheck2
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, api } from '../api'
 import { BoxNavigation } from '../components/BoxNavigation'
+import { ClientRequirementsNote } from '../components/ClientRequirementsNote'
 import { boundedBoxIndex } from '../resultPresentation'
 import { SourceDocument } from '../components/SourceDocument'
 import { RecommendationPreview } from '../components/RecommendationPreview'
@@ -240,6 +241,7 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
 
       {busy && <p role="status" className="operation-status">{operation || 'Completing your request…'}</p>}
       {order.extraction_warnings?.length ? <div className="form-error" role="alert">{order.extraction_warnings.join(' ')}</div> : null}
+      {order.client_requirements && <ClientRequirementsNote note={order.client_requirements} />}
 
 
       {editing ? (

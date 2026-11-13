@@ -11,14 +11,15 @@ import {
   useTable,
   type SortingState,
 } from '@tanstack/react-table'
-import { ArrowDown, ArrowUp, ArrowUpDown, FileSpreadsheet, LoaderCircle, Map as MapIcon, Pencil, Search, Table2, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ClipboardList, FileSpreadsheet, LoaderCircle, Map as MapIcon, Pencil, Search, StickyNote, Table2, Trash2 } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { DeleteClientsDialog, EditClientDialog } from '../components/ClientDialogs'
+import { ClientRequirements } from '../components/ClientRequirements'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
-import type { Client, ClientInput } from '../types'
+import type { Client, ClientInput, ClientRequirement } from '../types'
 
 // Leaflet and the country shapes are only downloaded when the map view is opened.
 const ClientsMap = lazy(() => import('../components/ClientsMap'))
@@ -46,10 +47,15 @@ const sortableHeader = (label: string) => function SortableHeader({ column }: { 
 
 const empty = <span className="text-muted-foreground">—</span>
 
-const dataColumns = [
+const buildDataColumns = (noteClientIds: ReadonlySet<number>) => [
   columnHelper.accessor('customer', {
     header: sortableHeader('Customer'),
-    cell: ({ row }) => <span className="block max-w-[240px] truncate font-semibold text-foreground" title={row.original.customer}>{row.original.customer}</span>,
+    cell: ({ row }) => (
+      <span className="client-name-cell">
+        <span className="block max-w-[240px] truncate font-semibold text-foreground" title={row.original.customer}>{row.original.customer}</span>
+        {noteClientIds.has(row.original.id) && <StickyNote className="client-note-icon" size={15} aria-label="Has special requirements" role="img"><title>Has special requirements</title></StickyNote>}
+      </span>
+    ),
   }),
   columnHelper.accessor('contact_name', {
     header: sortableHeader('Contact name'),
@@ -76,8 +82,8 @@ const dataColumns = [
   }),
 ]
 
-const buildColumns = (onEdit: (client: Client) => void, onDelete: (client: Client) => void) => columnHelper.columns([
-  ...dataColumns,
+const buildColumns = (onEdit: (client: Client) => void, onDelete: (client: Client) => void, noteClientIds: ReadonlySet<number>) => columnHelper.columns([
+  ...buildDataColumns(noteClientIds),
   columnHelper.display({
     id: 'actions',
     header: () => <span className="sr-only">Actions</span>,
@@ -96,7 +102,9 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
   const [query, setQuery] = useState('')
-  const [view, setView] = useState<'table' | 'map'>('table')
+  const [view, setView] = useState<'table' | 'map' | 'requirements'>('table')
+  const [requirements, setRequirements] = useState<ClientRequirement[]>([])
+  const [requirementsLoading, setRequirementsLoading] = useState(true)
   const [sorting, setSorting] = useState<SortingState>([{ id: 'customer', desc: false }])
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 10 })
   const fileRef = useRef<HTMLInputElement>(null)
@@ -105,7 +113,9 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
   const [deleteTarget, setDeleteTarget] = useState<Client | true | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
-  const columns = useMemo(() => buildColumns(setEditing, (client) => { setDeleteError(''); setDeleteTarget(client) }), [])
+  // Clients that have a packing note get a small marker next to their name.
+  const noteClientIds = useMemo(() => new Set(requirements.flatMap((requirement) => requirement.client_id === null ? [] : [requirement.client_id])), [requirements])
+  const columns = useMemo(() => buildColumns(setEditing, (client) => { setDeleteError(''); setDeleteTarget(client) }, noteClientIds), [noteClientIds])
 
   const load = useCallback(async () => {
     try { setClients(await api.clients()) }
@@ -113,7 +123,13 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
     finally { setLoading(false) }
   }, [notify])
 
-  useEffect(() => { load() }, [load])
+  const loadRequirements = useCallback(async () => {
+    try { setRequirements(await api.clientRequirements()) }
+    catch (error) { notify(error instanceof Error ? error.message : 'Special requirements could not be loaded.', true) }
+    finally { setRequirementsLoading(false) }
+  }, [notify])
+
+  useEffect(() => { load(); loadRequirements() }, [load, loadRequirements])
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -151,6 +167,7 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
     if (!editing) return
     const updated = await api.updateClient(editing.id, payload)
     setClients((current) => current.map((client) => client.id === updated.id ? updated : client))
+    loadRequirements() // a renamed client changes the name shown for its linked requirement
     setEditing(null)
     notify(`${updated.customer} updated.`)
   }
@@ -169,6 +186,7 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
         setClients((current) => current.filter((client) => client.id !== deleteTarget.id))
         notify(`${deleteTarget.customer} deleted.`)
       }
+      loadRequirements() // deleting a client unlinks its requirements but keeps them
       setDeleteTarget(null)
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : 'The client could not be deleted. Please try again.')
@@ -190,12 +208,16 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
         <div><span className="eyebrow">MASTER DATA / CLIENTS</span><h1>Clients</h1><p>Customer contacts and shipping details, imported from Excel.</p></div>
         <div className="catalog-health"><span>CLIENT DIRECTORY</span><strong>{clients.length} records</strong></div>
       </header>
-      <p className="results-count" role="status">{filtered.length} of {clients.length} clients</p>
+      {view !== 'requirements' && <p className="results-count" role="status">{filtered.length} of {clients.length} clients</p>}
       <div className="catalog-tabs" role="group" aria-label="Clients view">
         <button aria-pressed={view === 'table'} className={ view === 'table' ? 'active' : ''} onClick={() => setView('table')}><Table2 size={18} /> Table</button>
         <button aria-pressed={view === 'map'} className={view === 'map' ? 'active' : ''} onClick={() => setView('map')}><MapIcon size={18} /> Map</button>
+        <button aria-pressed={view === 'requirements'} className={view === 'requirements' ? 'active' : ''} onClick={() => setView('requirements')}><ClipboardList size={18} /> Special requirements <b>{requirements.length}</b></button>
       </div>
       <section className="panel data-panel">
+        {view === 'requirements' ? (
+          <ClientRequirements requirements={requirements} clients={clients} loading={requirementsLoading} reload={loadRequirements} notify={notify} />
+        ) : <>
         <div className="table-tools">
           <label><Search size={17} /><Input aria-label="Search clients" type="search" value={query} onChange={(event) => { setQuery(event.target.value); table.setPageIndex(0) }} placeholder="Search customer, contact, email or country…" /></label>
           <div>
@@ -246,6 +268,7 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
             <Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>Next</Button>
           </div>
         </div>
+        </>}
         </>}
       </section>
       {/*<p className="clients-hint">Excel columns: Customer (required), Phone Number, Email, Contact Name, Address, Country, Shipping Address. Rows with an existing customer name update that client.</p>*/}

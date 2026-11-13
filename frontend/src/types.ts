@@ -132,6 +132,7 @@ export interface OrderDetailData {
   status: string
   confidence: number
   items: OrderItem[]
+  client_requirements?: OrderRequirementsNote | null
   source_available?: boolean
   extraction_warnings?: string[]
   plan?: PackingPlan | null
@@ -189,6 +190,46 @@ export interface Client {
 export interface ClientImportResult { imported: number; created: number; updated: number; errors: string[] }
 
 export type ClientInput = Pick<Client, 'customer' | 'phone_number' | 'email' | 'contact_name' | 'address' | 'country' | 'shipping_address'>
+
+/** Special handling the person packing must follow for a customer (from the "Special clients" sheet). */
+export interface ClientRequirement {
+  id: number
+  company: string
+  aliases: string[]
+  client_id: number | null
+  client_name: string | null
+  /** Closest client when the requirement is not linked yet; the user confirms it with one click. */
+  suggested_client: { id: number; customer: string; score: number } | null
+  invoice_email: string
+  payment: string
+  pricing_requirements: string
+  docs_required: string
+  courier: string
+  comments: string
+  created_at: string
+  updated_at: string
+}
+
+export type ClientRequirementInput = Pick<ClientRequirement,
+  'company' | 'aliases' | 'client_id' | 'invoice_email' | 'payment' | 'pricing_requirements' | 'docs_required' | 'courier' | 'comments'>
+
+export interface ClientRequirementsImportResult {
+  imported: number; created: number; updated: number
+  linked: number; suggested: number; unlinked: number
+  errors: string[]
+}
+
+/** The note an order shows its packer. `suggested` means the customer name only resembles the company. */
+export interface OrderRequirementsNote {
+  requirement_id: number
+  match: 'exact' | 'suggested'
+  score: number
+  company: string
+  docs_required: string
+  pricing_requirements: string
+  courier: string
+  comments: string
+}
 
 export type DhlServiceId = 'express_worldwide' | 'premium_1200' | 'premium_0900'
 /** 'dhl' = DHL's published weekly fuel / demand schedule. 'saved' is the legacy name of 'dhl'. */

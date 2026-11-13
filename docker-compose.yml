@@ -1,0 +1,36 @@
+# Production-like stack: a single container serves the React app and the API.
+#   docker compose up -d --build
+#   http://localhost:10000
+# Data (SQLite) persists in the "packflow-data" volume across restarts/rebuilds.
+name: packflow
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: packflow:latest
+    container_name: packflow-app
+    restart: unless-stopped
+    ports:
+      - "${PACKFLOW_PORT:-10000}:10000"
+    environment:
+      PORT: "10000"
+      PACKFLOW_DB_PATH: /app/data/packflow.db
+      PACKFLOW_SEED_REFERENCE_CATALOG: "${PACKFLOW_SEED_REFERENCE_CATALOG:-true}"
+    volumes:
+      - packflow-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  packflow-data:
