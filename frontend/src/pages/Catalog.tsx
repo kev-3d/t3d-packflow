@@ -1,7 +1,7 @@
 import { Badge } from '../components/ui/badge'
 import { Input } from '../components/ui/input'
 import { Button } from '../components/ui/button'
-import { AlertTriangle, Box, FileSpreadsheet, LoaderCircle, PackagePlus, Plus, RotateCcw, Ruler, Search, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Box, FileSpreadsheet, LoaderCircle, PackagePlus, Pencil, Plus, RotateCcw, Ruler, Search, Trash2, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { useMemo, useRef, useState } from 'react'
 import { api } from '../api'
@@ -19,6 +19,7 @@ export function Catalog({ products, boxes, onRefresh, notify }: CatalogProps) {
   const [tab, setTab] = useState<'products' | 'boxes'>('products')
   const [query, setQuery] = useState('')
   const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<Product | BoxType | null>(null)
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const [toDelete, setToDelete] = useState<PendingDelete | null>(null)
@@ -87,15 +88,15 @@ export function Catalog({ products, boxes, onRefresh, notify }: CatalogProps) {
         {!(tab === 'products' ? filteredProducts : filteredBoxes).length && <div className="empty-row">{query ? 'No matches. Try another name.' : 'Your catalog is empty. Add a record or import an Excel file.'}</div>}
         {tab === 'products' ? (
           <div className="catalog-table product-table" role="region" aria-label="Product catalog" tabIndex={0}>
-            <div className="catalog-table-head"><span>PRODUCT</span><span>DIMENSIONS</span><span>WEIGHT</span><span>ROTATION</span><span>TYPE</span><span>STATUS</span></div>
+            <div className="catalog-table-head"><span>PRODUCT</span><span>DIMENSIONS</span><span>PRICE</span><span>WEIGHT</span><span>ROTATION</span><span>STATUS</span></div>
             {filteredProducts.map((product) => (
               <div key={product.id} className="catalog-row">
                 <span><i className="product-cube" /><b>{product.name}</b><small>Matched by description</small></span>
                 <span><Ruler size={15} /> {product.length_cm} × {product.width_cm} × {product.height_cm} cm</span>
-                <span>{product.weight_kg.toFixed(2)} kg</span>
-                <span><RotateCcw size={15} /> {product.rotation_allowed ? 'Allowed' : 'Fixed'}</span>
-                <span>{product.fragile ? 'Fragile' : 'Standard'}</span>
-                <div className="catalog-row-end"><Badge className="status-pill status-pill--packed"><i />Active</Badge><button type="button" className="row-delete-button" aria-label={`Delete product ${product.name}`} title="Delete product" onClick={() => askDelete({ type: 'products', id: product.id, label: product.name })}><Trash2 size={16} /></button></div>
+                <span>€{(product.price_eur ?? 0).toFixed(2)}</span>
+                <span>{product.weight_kg.toFixed(3)} kg</span>
+                <span><RotateCcw size={15} /> {product.rotation_allowed ? 'Allowed' : 'Fixed'}{product.fragile ? ' · Fragile' : ''}</span>
+                <div className="catalog-row-end"><Badge className="status-pill status-pill--packed"><i />Active</Badge><button type="button" className="row-delete-button row-edit-button" aria-label={`Edit product ${product.name}`} title="Edit product" onClick={() => setEditing(product)}><Pencil size={16} /></button><button type="button" className="row-delete-button" aria-label={`Delete product ${product.name}`} title="Delete product" onClick={() => askDelete({ type: 'products', id: product.id, label: product.name })}><Trash2 size={16} /></button></div>
               </div>
             ))}
           </div>
@@ -108,7 +109,7 @@ export function Catalog({ products, boxes, onRefresh, notify }: CatalogProps) {
                 <span><Ruler size={15} /> {box.length_cm} × {box.width_cm} × {box.height_cm} cm</span>
                 <span>{box.empty_weight_kg.toFixed(2)} kg</span><span>{box.max_weight_kg.toFixed(1)} kg</span>
                 <span>{((box.length_cm * box.width_cm * box.height_cm) / 1000).toFixed(1)} L</span>
-                <div className="catalog-row-end"><Badge className="status-pill status-pill--packed"><i />Active</Badge><button type="button" className="row-delete-button" aria-label={`Delete box ${box.code}`} title="Delete box" onClick={() => askDelete({ type: 'boxes', id: box.id, label: box.code })}><Trash2 size={16} /></button></div>
+                <div className="catalog-row-end"><Badge className="status-pill status-pill--packed"><i />Active</Badge><button type="button" className="row-delete-button row-edit-button" aria-label={`Edit box ${box.code}`} title="Edit box" onClick={() => setEditing(box)}><Pencil size={16} /></button><button type="button" className="row-delete-button" aria-label={`Delete box ${box.code}`} title="Delete box" onClick={() => askDelete({ type: 'boxes', id: box.id, label: box.code })}><Trash2 size={16} /></button></div>
               </div>
             ))}
           </div>
@@ -116,6 +117,7 @@ export function Catalog({ products, boxes, onRefresh, notify }: CatalogProps) {
       </section>
       {toDelete && <DeleteRecordDialog record={toDelete} busy={deleting} error={deleteError} onClose={() => setToDelete(null)} onConfirm={confirmDelete} />}
       {showForm && <CatalogForm type={tab} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); notify('Record added to the catalog.'); onRefresh() }} />}
+      {editing && <CatalogForm type={tab} record={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); notify('Changes saved.'); onRefresh() }} />}
     </div>
   )
 }
@@ -141,7 +143,10 @@ function DeleteRecordDialog({ record, busy, error, onClose, onConfirm }: { recor
   )
 }
 
-function CatalogForm({ type, onClose, onSaved }: { type: 'products' | 'boxes'; onClose: () => void; onSaved: () => void }) {
+function CatalogForm({ type, record, onClose, onSaved }: { type: 'products' | 'boxes'; record?: Product | BoxType; onClose: () => void; onSaved: () => void }) {
+  const product = type === 'products' ? record as Product | undefined : undefined
+  const box = type === 'boxes' ? record as BoxType | undefined : undefined
+  const noun = type === 'products' ? 'product' : 'box type'
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const dialogRef = useDialogFocus<HTMLFormElement>(onClose, busy)
@@ -152,9 +157,13 @@ function CatalogForm({ type, onClose, onSaved }: { type: 'products' | 'boxes'; o
     const number = (name: string) => Number(data.get(name))
     try {
       if (type === 'products') {
-        await api.createProduct({ name: data.get('name'), length_cm: number('length'), width_cm: number('width'), height_cm: number('height'), weight_kg: number('weight'), rotation_allowed: true, fragile: false })
+        const payload = { name: data.get('name'), length_cm: number('length'), width_cm: number('width'), height_cm: number('height'), weight_kg: number('weight'), price_eur: number('price'), rotation_allowed: product ? Boolean(product.rotation_allowed) : true, fragile: product ? Boolean(product.fragile) : false }
+        if (product) await api.updateProduct(product.id, payload)
+        else await api.createProduct(payload)
       } else {
-        await api.createBox({ code: data.get('code'), name: data.get('name'), length_cm: number('length'), width_cm: number('width'), height_cm: number('height'), empty_weight_kg: number('weight'), max_weight_kg: number('maxWeight') })
+        const payload = { code: data.get('code'), name: data.get('name'), length_cm: number('length'), width_cm: number('width'), height_cm: number('height'), empty_weight_kg: number('weight'), max_weight_kg: number('maxWeight') }
+        if (box) await api.updateBox(box.id, payload)
+        else await api.createBox(payload)
       }
       onSaved()
     } catch (err) {
@@ -163,21 +172,22 @@ function CatalogForm({ type, onClose, onSaved }: { type: 'products' | 'boxes'; o
     }
   }
   return (
-    <div className="modal-layer" role="dialog" aria-modal="true" aria-label={type === 'products' ? 'New product' : 'New box type'}>
+    <div className="modal-layer" role="dialog" aria-modal="true" aria-label={record ? `Edit ${noun}` : `New ${noun}`}>
       <button className="modal-backdrop" tabIndex={-1} aria-hidden="true" disabled={busy} onClick={onClose} aria-label="Close form" />
       <form ref={dialogRef} className="catalog-form" onSubmit={submit}>
-        <header><div><span className="eyebrow">CATALOG / NEW RECORD</span><h2>New {type === 'products' ? 'product' : 'box type'}</h2></div><button type="button" disabled={busy} className="icon-button" aria-label="Close form" onClick={onClose}><X /></button></header>
+        <header><div><span className="eyebrow">CATALOG / {record ? 'EDIT RECORD' : 'NEW RECORD'}</span><h2>{record ? `Edit ${noun}` : `New ${noun}`}</h2></div><button type="button" disabled={busy} className="icon-button" aria-label="Close form" onClick={onClose}><X /></button></header>
         <div className="form-grid">
-          {type === 'boxes' && <label><span>Code</span><Input name="code" required placeholder="BX-01" /></label>}
-          <label><span>Name</span><Input name="name" required placeholder="Clear description" /></label>
-          <label><span>Length (cm)</span><Input name="length" type="number" step="0.01" min="0.01" required /></label>
-          <label><span>Width (cm)</span><Input name="width" type="number" step="0.01" min="0.01" required /></label>
-          <label><span>Height (cm)</span><Input name="height" type="number" step="0.01" min="0.01" required /></label>
-          <label><span>{type === 'products' ? 'Weight (kg)' : 'Empty weight (kg)'}</span><Input name="weight" type="number" step="0.01" min={type === 'products' ? '0.01' : '0'} required /></label>
-          {type === 'boxes' && <label><span>Max. weight (kg)</span><Input name="maxWeight" type="number" step="0.01" min="0.01" required /></label>}
+          {type === 'boxes' && <label><span>Code</span><Input name="code" required placeholder="BX-01" defaultValue={box?.code} /></label>}
+          <label><span>Name</span><Input name="name" required placeholder="Clear description" defaultValue={record?.name} /></label>
+          <label><span>Length (cm)</span><Input name="length" type="number" step="0.01" min="0.01" required defaultValue={record?.length_cm} /></label>
+          <label><span>Width (cm)</span><Input name="width" type="number" step="0.01" min="0.01" required defaultValue={record?.width_cm} /></label>
+          <label><span>Height (cm)</span><Input name="height" type="number" step="0.01" min="0.01" required defaultValue={record?.height_cm} /></label>
+          <label><span>{type === 'products' ? 'Weight (kg)' : 'Empty weight (kg)'}</span><Input name="weight" type="number" step="0.001" min={type === 'products' ? '0.001' : '0'} required defaultValue={product?.weight_kg ?? box?.empty_weight_kg} /></label>
+          {type === 'products' && <label><span>Price (€)</span><Input name="price" type="number" step="0.01" min="0" required defaultValue={product?.price_eur ?? 0} /></label>}
+          {type === 'boxes' && <label><span>Max. weight (kg)</span><Input name="maxWeight" type="number" step="0.01" min="0.01" required defaultValue={box?.max_weight_kg} /></label>}
         </div>
         {error && <p role="alert" className="form-error">{error}</p>}
-        <footer><Button type="button" className="button button--ghost" disabled={busy} onClick={onClose}>Cancel</Button><Button className="button button--accent" disabled={busy}>{busy ? 'Saving…' : 'Save record'}</Button></footer>
+        <footer><Button type="button" className="button button--ghost" disabled={busy} onClick={onClose}>Cancel</Button><Button className="button button--accent" disabled={busy}>{busy ? 'Saving…' : record ? 'Save changes' : 'Save record'}</Button></footer>
       </form>
     </div>
   )

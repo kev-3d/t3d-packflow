@@ -19,6 +19,9 @@ services:
       PORT: "10000"
       PACKFLOW_DB_PATH: /app/data/packflow.db
       PACKFLOW_SEED_REFERENCE_CATALOG: "${PACKFLOW_SEED_REFERENCE_CATALOG:-true}"
+      SLACK_WEBHOOK_URL: "${SLACK_WEBHOOK_URL:-}"
+      SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN:-}"
+      SLACK_CHANNEL_ID: "${SLACK_CHANNEL_ID:-}"
     volumes:
       - packflow-data:/app/data
     read_only: true

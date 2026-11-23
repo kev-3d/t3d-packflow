@@ -41,11 +41,48 @@ def box(id=1, length=6, width=6, height=6, max_weight=20):
 
 
 class OptimizationTests(unittest.TestCase):
-    def test_minimizes_total_empty_volume_even_with_more_boxes(self):
+    def test_prefers_fewer_boxes_over_less_empty_volume(self):
         result = pack_order([product(2)], [box(), box(2, 13, 7, 7)])
+        self.assertEqual(result["box_count"], 1)
+        self.assertEqual(result["boxes"][0]["box_code"], "B2")
+
+    def test_uses_fewest_boxes_then_smallest_closing_box(self):
+        # 9 cubes: one 18x18x6 box takes all of them; 3 small boxes would leave no gaps.
+        result = pack_order([product(9)], [box(), box(2, 12, 12, 6), box(3, 18, 18, 6), box(4, 30, 30, 30)])
+        self.assertEqual(result["box_count"], 1)
+        self.assertEqual(result["boxes"][0]["box_code"], "B3")
+        # 10 cubes need two boxes: a full 18x18x6 and the smallest box for the last cube.
+        result = pack_order([product(10)], [box(), box(3, 18, 18, 6)])
+        self.assertEqual(sorted(b["box_code"] for b in result["boxes"]), ["B1", "B3"])
+
+    def test_objectives_trade_box_count_for_volume_and_dhl_cost(self):
+        # 16 light cubes: one 30x30x30 box holds all; two 12x12x12 boxes hold 8 each with
+        # less carton volume; DHL volumetric weight follows carton volume for light goods.
+        rows = [dict(product(16), weight_kg=.05)]
+        boxes = [box(1, 12, 12, 12), box(2, 30, 30, 30)]
+        fewest = pack_order(rows, boxes, "fewest_boxes", dhl_zone=1)
+        volume = pack_order(rows, boxes, "smallest_volume", dhl_zone=1)
+        cost = pack_order(rows, boxes, "lowest_dhl_cost", dhl_zone=1)
+        self.assertEqual((fewest["box_count"], fewest["boxes"][0]["box_code"]), (1, "B2"))
+        self.assertEqual(volume["box_count"], 2)
+        self.assertTrue(all(b["box_code"] == "B1" for b in volume["boxes"]))
+        self.assertEqual(cost["box_count"], 2)
+        options = {o["objective"]: o for o in cost["options"]}
+        self.assertEqual(set(options), {"fewest_boxes", "lowest_dhl_cost", "smallest_volume"})
+        self.assertTrue(options["lowest_dhl_cost"]["selected"])
+        self.assertLess(options["lowest_dhl_cost"]["estimated_dhl_eur"], options["fewest_boxes"]["estimated_dhl_eur"])
+        self.assertLess(options["smallest_volume"]["total_volume_l"], options["fewest_boxes"]["total_volume_l"])
+        self.assertEqual(cost["objective"], "lowest_dhl_cost")
+
+    def test_unknown_objective_is_rejected(self):
+        with self.assertRaises(ValueError):
+            pack_order([product()], [box()], "cheapest")
+
+    def test_weight_limit_forces_another_box(self):
+        result = pack_order([product(4)], [box(1, 30, 30, 30, max_weight=3)])
+        self.assertEqual(result["status"], "complete")
         self.assertEqual(result["box_count"], 2)
-        self.assertEqual(sum(b["remaining_volume_l"] for b in result["boxes"]), 0)
-        self.assertTrue(all(b["box_code"] == "B1" for b in result["boxes"]))
+        self.assertTrue(all(b["gross_weight_kg"] <= 3 for b in result["boxes"]))
 
     def test_smallest_box_that_fits_whole_order_is_used(self):
         result = pack_order([product(2)], [box(1, 13, 6, 6), box(2, 20, 10, 10)])

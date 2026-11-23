@@ -63,7 +63,8 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
-  analyzeOrder: (id: number) => request(`/orders/${id}/analyze`, { method: 'POST' }),
+  analyzeOrder: (id: number, objective?: string) =>
+    request(`/orders/${id}/analyze${objective ? `?objective=${encodeURIComponent(objective)}` : ''}`, { method: 'POST' }),
   addSuggestedItem: (orderId: number, sourceItemId: number, quantity: number, expectedPlanId?: number) =>
     request<OrderDetailData>(`/orders/${orderId}/suggested-items`, {
       method: 'POST',
@@ -115,6 +116,18 @@ export const api = {
   createProduct: (payload: object) =>
     request<Product>('/catalog/products', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  updateProduct: (id: number, payload: object) =>
+    request<Product>(`/catalog/products/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  updateBox: (id: number, payload: object) =>
+    request<BoxType>(`/catalog/boxes/${id}`, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),

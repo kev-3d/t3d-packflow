@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Palette: Thought3D brand blue #32C4F3, its tints/shades, and white -->
+  <defs>
+    <radialGradient id="bg" cx=".5" cy=".45" r=".75">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset=".7" stop-color="#E3F7FE"/>
+      <stop offset="1" stop-color="#BDEBFB"/>
+    </radialGradient>
+    <linearGradient id="front" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6AD7F8"/>
+      <stop offset="1" stop-color="#32C4F3"/>
+    </linearGradient>
+    <linearGradient id="side" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1FAEE3"/>
+      <stop offset="1" stop-color="#138DC2"/>
+    </linearGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#A6E9FC"/>
+      <stop offset="1" stop-color="#8BE0FA"/>
+    </linearGradient>
+    <clipPath id="frontClip"><polygon points="400,330 792,298 802,822 410,872"/></clipPath>
+    <clipPath id="topClip"><polygon points="228,250 620,214 792,298 400,330"/></clipPath>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+
+  <!-- Ground shadow -->
+  <ellipse cx="530" cy="872" rx="350" ry="52" fill="#8FD8F4" opacity=".75"/>
+
+  <g stroke="#074B6E" stroke-width="18" stroke-linejoin="round" stroke-linecap="round">
+    <!-- Left side -->
+    <polygon points="228,250 400,330 410,872 248,782" fill="url(#side)"/>
+    <!-- Top -->
+    <polygon points="228,250 620,214 792,298 400,330" fill="url(#top)"/>
+    <!-- Front -->
+    <polygon points="400,330 792,298 802,822 410,872" fill="url(#front)"/>
+  </g>
+
+  <!-- Front cel shade + edge highlight -->
+  <g clip-path="url(#frontClip)">
+    <path d="M700 290 Q760 560 690 900 H820 V280 Z" fill="#22B4E8" opacity=".55"/>
+    <path d="M428 360 L436 820" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round" opacity=".55"/>
+  </g>
+
+  <!-- Packing tape across the top and down the front -->
+  <g clip-path="url(#topClip)">
+    <polygon points="386,236 456,229 632,322 562,328" fill="#F2FBFF"/>
+    <polygon points="432,232 456,229 632,322 608,324" fill="#CDEFFC"/>
+    <g stroke="#074B6E" stroke-width="9" stroke-linecap="round">
+      <line x1="386" y1="236" x2="562" y2="328"/>
+      <line x1="456" y1="229" x2="632" y2="322"/>
+    </g>
+  </g>
+  <polygon points="562,320 632,314 634,392 564,398" fill="#F2FBFF" stroke="#074B6E" stroke-width="10" stroke-linejoin="round"/>
+  <g stroke="#9ADFF6" stroke-width="5" stroke-linecap="round">
+    <line x1="578" y1="350" x2="578" y2="384"/>
+    <line x1="596" y1="348" x2="596" y2="382"/>
+    <line x1="614" y1="346" x2="614" y2="380"/>
+  </g>
+  <!-- Top edges redrawn over the tape -->
+  <g fill="none" stroke="#074B6E" stroke-width="18" stroke-linejoin="round" stroke-linecap="round">
+    <polygon points="228,250 620,214 792,298 400,330"/>
+  </g>
+
+  <!-- Side: small tape tab -->
+  <polygon points="262,282 318,308 320,370 264,344" fill="#F2FBFF" stroke="#074B6E" stroke-width="10" stroke-linejoin="round"/>
+
+  <!-- Side: Thought3D bulb mark, skewed onto the side panel -->
+  <g transform="translate(326,600) matrix(1,0.47,0,1,0,0)" fill="none" stroke="#E8F9FF" stroke-width="12" stroke-linecap="round" opacity=".9">
+    <path d="M-22 4 A34 34 0 1 1 22 4"/>
+    <path d="M-16 28 H16"/>
+    <path d="M-16 46 H16"/>
+    <path d="M-12 64 H12 A12 9 0 0 1 -12 64 Z" fill="#E8F9FF" stroke-width="8"/>
+  </g>
+
+  <!-- Face -->
+  <g stroke="#074B6E" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Eyebrows -->
+    <path d="M468 410 Q512 376 562 396" fill="none" stroke-width="16"/>
+    <path d="M638 384 Q690 364 730 392" fill="none" stroke-width="16"/>
+    <!-- Eyes -->
+    <ellipse cx="522" cy="508" rx="74" ry="90" fill="#FFFFFF" stroke-width="14" transform="rotate(-4 522 508)"/>
+    <ellipse cx="686" cy="494" rx="70" ry="86" fill="#FFFFFF" stroke-width="14" transform="rotate(-4 686 494)"/>
+  </g>
+  <circle cx="540" cy="530" r="34" fill="#074B6E"/>
+  <circle cx="700" cy="516" r="32" fill="#074B6E"/>
+  <circle cx="552" cy="516" r="12" fill="#FFFFFF"/>
+  <circle cx="711" cy="503" r="11" fill="#FFFFFF"/>
+  <circle cx="530" cy="545" r="5" fill="#FFFFFF"/>
+  <circle cx="690" cy="530" r="5" fill="#FFFFFF"/>
+
+  <!-- Smile -->
+  <path d="M466 668 Q604 770 754 640" fill="none" stroke="#074B6E" stroke-width="18" stroke-linecap="round"/>
+  <path d="M454 652 Q462 672 480 676" fill="none" stroke="#074B6E" stroke-width="12" stroke-linecap="round"/>
+  <path d="M744 622 Q752 644 742 660" fill="none" stroke="#074B6E" stroke-width="12" stroke-linecap="round"/>
+</svg>

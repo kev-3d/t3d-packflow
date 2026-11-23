@@ -62,5 +62,49 @@ class ProductMatchingTests(unittest.TestCase):
                 self.assertEqual(product["name"], expected)
 
 
+class VariantCatalogMatchingTests(unittest.TestCase):
+    """Catalog with one product per variant, as loaded from 'Boxes and Prices'."""
+
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.row_factory = sqlite3.Row
+        self.db.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)")
+        self.db.executemany(
+            "INSERT INTO products (name, active) VALUES (?, 1)",
+            [(name,) for name in (
+                "Magigoo Original", "Magigoo Supergrip", "Magigoo PP", "Magigoo PPGF",
+                "Magigoo Pro Kit", "Magigoo Original Glide 250ml", "Magigoo Supergrip Glide 250ml",
+                "Magigoo PC Glide 250ml", "Magigoo Glide Kit", "Magigoo Glide kit - Supergrip",
+            )],
+        )
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_maps_purchase_order_wording_to_variant_products(self):
+        cases = {
+            "MAGIGOO SUPERGRIP GLIDE KIT": "Magigoo Glide kit - Supergrip",
+            "MAGIGOO Glide kit": "Magigoo Glide Kit",
+            "MAGIGOO Glide 250ml - Supergrip": "Magigoo Supergrip Glide 250ml",
+            "MAGIGOO Glide 250ml bottle - PC": "Magigoo PC Glide 250ml",
+            "MAGIGOO Glide 250ml bottle ": "Magigoo Original Glide 250ml",
+            "MAGIGOO Glide": "Magigoo Original Glide 250ml",
+            "MAGIGOO PP  - 50 ml": "Magigoo PP",
+            "Magigoo PPGF 50ml": "Magigoo PPGF",
+            "MAGIGOO Original - 50 ml": "Magigoo Original",
+            "Magigoo Supergrip ": "Magigoo Supergrip",
+            "Magigoo Pro Kit": "Magigoo Pro Kit",
+        }
+        for description, expected in cases.items():
+            with self.subTest(description=description):
+                product = _find_product_by_description(self.db, description)
+                self.assertIsNotNone(product)
+                self.assertEqual(product["name"], expected)
+
+    def test_named_variant_missing_from_catalog_is_not_swapped(self):
+        self.assertIsNone(_find_product_by_description(self.db, "MAGIGOO Glide 250ml - HT"))
+        self.assertIsNone(_find_product_by_description(self.db, "Magigoo PA 50ml"))
+
+
 if __name__ == "__main__":
     unittest.main()

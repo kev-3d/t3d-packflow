@@ -164,8 +164,14 @@ def simulate_box(spec: BoxSpec, units: list[Unit]) -> PackedBox:
         ordered = sorted(units, key=key, reverse=True)
         for axis in range(3):
             trial = PackedBox(spec)
+            # Free space only ever shrinks, so a unit shape that failed once cannot fit later.
+            failed: set[tuple[float, float, float, float, bool]] = set()
             for unit in ordered:
-                place_unit(trial, unit, axis)
+                signature = (unit.length, unit.width, unit.height, unit.weight, unit.rotation_allowed)
+                if signature in failed:
+                    continue
+                if not place_unit(trial, unit, axis):
+                    failed.add(signature)
             if (trial.used_volume, len(trial.placements)) > (best.used_volume, len(best.placements)):
                 best = trial
             if len(best.placements) == len(units):
@@ -208,9 +214,29 @@ def _box_to_dict(box: PackedBox, sequence: int) -> dict[str, Any]:
     }
 
 
+OBJECTIVES: dict[str, str] = {
+    "fewest_boxes": "Fewest boxes",
+    "lowest_dhl_cost": "Lower DHL shipping cost",
+    "smallest_volume": "Smallest total carton volume",
+}
+DEFAULT_OBJECTIVE = "fewest_boxes"
+# Ranking zone when the destination is unknown. Base rates rise with weight in every
+# zone, so the ranking barely depends on it; the estimate is flagged as assumed.
+DEFAULT_DHL_ZONE = 1
+
+
 def pack_order(
-    item_rows: list[dict[str, Any]], box_rows: list[dict[str, Any]]
+    item_rows: list[dict[str, Any]], box_rows: list[dict[str, Any]],
+    objective: str = DEFAULT_OBJECTIVE, dhl_zone: int | None = None,
 ) -> dict[str, Any]:
+    """Pack an order for one objective and report the best plan for every objective.
+
+    ``objective``: ``fewest_boxes`` (count, then carton volume), ``lowest_dhl_cost``
+    (estimated DHL transport + piece surcharges, then count) or ``smallest_volume``
+    (total carton volume = highest utilization, then count).
+    """
+    if objective not in OBJECTIVES:
+        raise ValueError(f"Unknown packing objective {objective!r}.")
     units: list[Unit] = []
     for item in item_rows:
         for index in range(int(item["quantity"])):
@@ -243,58 +269,214 @@ def pack_order(
     ]
     specs.sort(key=lambda box: box.volume)
 
-    # Bounded beam search over complete plans. For a fixed order, minimizing
-    # total box volume minimizes unused space; box count is a tie breaker.
-    # Keep the best state for each remaining subset to avoid equivalent paths.
-    states = [(list(units), [])]
-    best_complete = None
-    best_partial = (list(units), [])
-    cache = {}
-    beam_width = 16
-    while states:
-        next_states = {}
-        for remaining, packed in states:
-            for spec in specs:
-                subset = tuple(u.uid for u in remaining)
-                cache_key = (spec.id, subset)
-                candidate = cache.get(cache_key)
-                if candidate is None:
-                    candidate = simulate_box(spec, remaining)
-                    cache[cache_key] = candidate
-                if not candidate.placements:
-                    continue
-                packed_ids = {p.unit.uid for p in candidate.placements}
-                rest = [u for u in remaining if u.uid not in packed_ids]
-                plan = packed + [candidate]
-                cost = (sum(b.spec.volume for b in plan), len(plan))
-                partial_score = (sum(u.volume for u in rest), *cost)
-                old_score = (sum(u.volume for u in best_partial[0]),
-                             sum(b.spec.volume for b in best_partial[1]), len(best_partial[1]))
-                if partial_score < old_score:
-                    best_partial = (rest, plan)
-                if not rest:
-                    if best_complete is None or cost < best_complete[0]:
-                        best_complete = (cost, plan)
-                    continue
-                # Admissible lower bound: remaining product volume.
-                if best_complete and cost[0] + sum(u.volume for u in rest) > best_complete[0][0] + EPSILON:
-                    continue
-                key = tuple(u.uid for u in rest)
-                previous = next_states.get(key)
-                if previous is None or cost < previous[0]:
-                    next_states[key] = (cost, rest, plan)
-        ranked = sorted(next_states.values(), key=lambda state: (
-            state[0][0] + sum(u.volume for u in state[1]),
-            len(state[1]), state[0][1],
-        ))
-        states = [(rest, plan) for _, rest, plan in ranked[:beam_width]]
-        # Cache is only useful for this frontier and otherwise grows with the order.
-        cache.clear()
-    if best_complete:
-        remaining, packed_boxes = [], best_complete[1]
-    else:
-        remaining, packed_boxes = best_partial
-    return _serialize_plan(packed_boxes, remaining, len(units))
+    zone = dhl_zone if dhl_zone in range(1, 7) else None
+    candidates = _candidate_plans(units, specs)
+    scored = [(plan, remaining, _plan_metrics(plan, zone)) for plan, remaining in candidates]
+    best = {
+        name: min(scored, key=lambda entry: (len(entry[1]), _objective_key(name, entry[2])))
+        for name in OBJECTIVES
+    }
+    packed_boxes, remaining, _ = best[objective]
+    result = _serialize_plan(packed_boxes, remaining, len(units))
+    result["objective"] = objective
+    result["objective_label"] = OBJECTIVES[objective]
+    result["dhl_zone"] = zone or DEFAULT_DHL_ZONE
+    result["dhl_zone_assumed"] = zone is None
+    result["options"] = [
+        {
+            "objective": name,
+            "label": label,
+            "selected": name == objective,
+            "complete": not best[name][1],
+            **best[name][2],
+            "boxes": _box_summary(best[name][0]),
+        }
+        for name, label in OBJECTIVES.items()
+    ]
+    return result
+
+
+def _objective_key(objective: str, metrics: dict[str, Any]) -> tuple[float, ...]:
+    count, volume = metrics["box_count"], metrics["total_volume_l"]
+    cost = metrics["estimated_dhl_eur"]
+    if objective == "lowest_dhl_cost":
+        return (cost, count, volume)
+    if objective == "smallest_volume":
+        return (volume, count, cost)
+    return (count, volume, cost)
+
+
+def _box_summary(plan: list[PackedBox]) -> list[dict[str, Any]]:
+    summary: dict[str, dict[str, Any]] = {}
+    for box in plan:
+        entry = summary.setdefault(box.spec.code, {"box_code": box.spec.code, "box_name": box.spec.name, "count": 0})
+        entry["count"] += 1
+    return list(summary.values())
+
+
+def _plan_metrics(plan: list[PackedBox], zone: int | None) -> dict[str, Any]:
+    """Box count, carton volume, utilization and the DHL figures that drive the price."""
+    from . import dhl_pricing  # local import keeps packing usable without the tariff file
+
+    tariff = dhl_pricing.load_tariff()
+    divisor = tariff["meta"]["volumetric_divisor"]
+    total_volume = sum(box.spec.volume for box in plan)
+    item_volume = sum(box.used_volume for box in plan)
+    chargeable = 0.0
+    handling = 0.0
+    for box in plan:
+        dims = (box.spec.length, box.spec.width, box.spec.height)
+        chargeable += max(box.gross_weight, box.spec.volume / divisor)
+        handling += dhl_pricing.piece_handling(box.gross_weight, dims, tariff)["amount"]
+    tariff_kg = dhl_pricing.tariff_weight(chargeable) if plan else 0.0
+    transport = dhl_pricing.base_rate(tariff_kg, zone or DEFAULT_DHL_ZONE, tariff) if plan else 0.0
+    return {
+        "box_count": len(plan),
+        "total_volume_l": round(total_volume / 1000, 2),
+        "utilization": round(item_volume / total_volume * 100, 1) if total_volume else 0.0,
+        "gross_weight_kg": round(sum(box.gross_weight for box in plan), 2),
+        "chargeable_kg": round(chargeable, 2),
+        "tariff_weight_kg": tariff_kg,
+        "handling_eur": round(handling, 2),
+        "estimated_dhl_eur": round(transport + handling, 2),
+    }
+
+
+def _contents_key(units: list[Unit]) -> tuple:
+    """Same multiset of unit shapes -> same packing outcome, whatever the unit ids."""
+    return tuple(sorted(
+        (unit.length, unit.width, unit.height, unit.weight, unit.rotation_allowed) for unit in units
+    ))
+
+
+class _Packer:
+    """Caches 'which is the smallest box type that holds these contents' by content shape."""
+
+    def __init__(self, specs: list[BoxSpec]) -> None:
+        self.specs = specs
+        self._smallest: dict[tuple, int | None] = {}
+
+    def smallest_box_for(self, units: list[Unit], max_volume: float | None = None) -> PackedBox | None:
+        """Smallest box type holding every unit, optionally no larger than ``max_volume``."""
+        key = (_contents_key(units), max_volume)
+        if key in self._smallest:
+            spec_id = self._smallest[key]
+            if spec_id is None:
+                return None
+            spec = next(spec for spec in self.specs if spec.id == spec_id)
+            return simulate_box(spec, units)
+        total_volume = sum(unit.volume for unit in units)
+        total_weight = sum(unit.weight for unit in units)
+        for spec in self.specs:
+            if max_volume is not None and spec.volume > max_volume + EPSILON:
+                break
+            if spec.volume + EPSILON < total_volume or spec.empty_weight + total_weight > spec.max_weight + EPSILON:
+                continue
+            trial = simulate_box(spec, units)
+            if len(trial.placements) == len(units):
+                self._smallest[key] = spec.id
+                return trial
+        self._smallest[key] = None
+        return None
+
+    def greedy(self, units: list[Unit], fill_specs: list[BoxSpec], score,
+               close_max_volume: float | None = None) -> tuple[list[PackedBox], list[Unit]]:
+        """Fill one box at a time with the fill box type scoring best on what is left; as
+        soon as one box (up to ``close_max_volume``) takes everything left, close with the
+        smallest such box."""
+        remaining = list(units)
+        plan: list[PackedBox] = []
+        while remaining:
+            closing = self.smallest_box_for(remaining, close_max_volume)
+            if closing is not None:
+                plan.append(closing)
+                return plan, []
+            best = None
+            for spec in fill_specs:
+                trial = simulate_box(spec, remaining)
+                if trial.placements and (best is None or score(trial) > score(best)):
+                    best = trial
+            if best is None:
+                break
+            plan.append(best)
+            packed_ids = {placement.unit.uid for placement in best.placements}
+            remaining = [unit for unit in remaining if unit.uid not in packed_ids]
+        return plan, remaining
+
+    def merge_boxes(self, plan: list[PackedBox], window: int = 6) -> list[PackedBox]:
+        """Merge two of the emptiest boxes into one box type while that saves a box
+        (the merged box may be larger than the two together)."""
+        improved = True
+        while improved and len(plan) > 1:
+            improved = False
+            order = sorted(range(len(plan)), key=lambda i: plan[i].used_volume)[:window]
+            for a_pos, a in enumerate(order):
+                for b in order[a_pos + 1:]:
+                    contents = [p.unit for p in plan[a].placements] + [p.unit for p in plan[b].placements]
+                    merged = self.smallest_box_for(contents)
+                    if merged is not None:
+                        plan = [box for i, box in enumerate(plan) if i not in (a, b)] + [merged]
+                        improved = True
+                        break
+                if improved:
+                    break
+        return plan
+
+    def shrink(self, plan: list[PackedBox], full: float = 1.0) -> list[PackedBox]:
+        """Swap each box for the smallest box type that still holds its contents.
+        Boxes at least ``full`` utilized are kept as they are."""
+        result = []
+        for box in plan:
+            if box.utilization >= full:
+                result.append(box)
+                continue
+            smaller = self.smallest_box_for([placement.unit for placement in box.placements])
+            result.append(smaller if smaller is not None and smaller.spec.volume < box.spec.volume else box)
+        return result
+
+
+def _candidate_plans(units: list[Unit], specs: list[BoxSpec],
+                     max_boxes_per_type: int = 60) -> list[tuple[list[PackedBox], list[Unit]]]:
+    """Diverse complete plans for the objectives to choose from.
+
+    - fill with the box type that takes the most volume / the most units (few big boxes);
+    - fill with one box type, closing with a box no larger than it (uniform cartons; small
+      ones cut carton volume and DHL volumetric weight). Box types that would need more
+      than ``max_boxes_per_type`` cartons are skipped.
+    Each plan is kept as filled (shrunk to the smallest box per carton) and with its
+    emptiest boxes merged (fewer cartons), so every objective has real alternatives.
+    """
+    if not units or not specs:
+        return [([], list(units))]
+    packer = _Packer(specs)
+    by_volume = lambda box: (box.used_volume, -box.spec.volume)  # noqa: E731
+    by_units = lambda box: (len(box.placements), -box.spec.volume)  # noqa: E731
+    total_volume = sum(unit.volume for unit in units)
+    runs: list[tuple[list[BoxSpec], Any, float | None, float]] = [
+        (specs, by_volume, None, 1.0), (specs, by_units, None, 1.0),
+    ]
+    # Uniform cartons: only boxes that are not well filled are worth trying smaller.
+    runs += [
+        ([spec], by_volume, spec.volume, 0.8) for spec in specs
+        if total_volume / spec.volume <= max_boxes_per_type
+    ]
+    candidates: list[tuple[list[PackedBox], list[Unit]]] = []
+    seen: set[tuple] = set()
+
+    def keep(plan: list[PackedBox], remaining: list[Unit]) -> None:
+        signature = (tuple(sorted(
+            (box.spec.id, _contents_key([p.unit for p in box.placements])) for box in plan
+        )), len(remaining))
+        if signature not in seen:
+            seen.add(signature)
+            candidates.append((plan, remaining))
+
+    for fill_specs, score, close_max, full in runs:
+        plan, remaining = packer.greedy(units, fill_specs, score, close_max)
+        shrunk = packer.shrink(plan, full)
+        keep(shrunk, remaining)
+        keep(packer.shrink(packer.merge_boxes(shrunk)), remaining)
+    return candidates
 
 
 def _serialize_plan(packed_boxes: list[PackedBox], remaining: list[Unit], unit_count: int) -> dict[str, Any]:
@@ -324,7 +506,7 @@ def _serialize_plan(packed_boxes: list[PackedBox], remaining: list[Unit], unit_c
                 {
                     "type": "space",
                     "title": "Available space",
-                    "detail": f"There are {remaining_liters} L available. The search selected the lowest total box volume found for this order.",
+                    "detail": f"There are {remaining_liters} L available. Each box is the smallest box type that holds its contents for the selected objective.",
                 }
             )
     if utilization >= 0.85:
@@ -372,7 +554,7 @@ def _serialize_plan(packed_boxes: list[PackedBox], remaining: list[Unit], unit_c
         ],
         "boxes": serialized,
         "suggestions": suggestions,
-        "method": "Bounded 3D plan search across multiple orientations and partitions; lowest total volume found",
+        "method": "3D packing across multiple orientations and partitions; best of several candidate plans for the selected objective",
     }
 
 

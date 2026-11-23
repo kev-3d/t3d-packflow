@@ -16,6 +16,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { api } from '../api'
 import { DeleteClientsDialog, EditClientDialog } from '../components/ClientDialogs'
 import { ClientRequirements } from '../components/ClientRequirements'
+import { WordmarkPagination } from '../components/WordmarkPagination'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
@@ -261,12 +262,8 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
             </TableBody>
           </Table>
         </div>
-        <div className="clients-pagination">
-          <span>Page {pagination.pageIndex + 1} of {pageCount}</span>
-          <div>
-            <Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>Previous</Button>
-            <Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>Next</Button>
-          </div>
+        <div className="clients-pagination clients-pagination--wordmark">
+          <WordmarkPagination label="Clients pages" pageIndex={pagination.pageIndex} pageCount={pageCount} onPageChange={(page) => table.setPageIndex(page)} />
         </div>
         </>}
         </>}

@@ -44,6 +44,7 @@ def init_db() -> None:
                 width_cm REAL NOT NULL CHECK(width_cm > 0),
                 height_cm REAL NOT NULL CHECK(height_cm > 0),
                 weight_kg REAL NOT NULL CHECK(weight_kg > 0),
+                price_eur REAL NOT NULL DEFAULT 0 CHECK(price_eur >= 0),
                 rotation_allowed INTEGER NOT NULL DEFAULT 1,
                 fragile INTEGER NOT NULL DEFAULT 0,
                 active INTEGER NOT NULL DEFAULT 1,
@@ -210,6 +211,7 @@ def _migrate_schema(db: sqlite3.Connection) -> None:
         _ensure_column(db, "orders", column, definition)
     for column, definition in item_columns.items():
         _ensure_column(db, "order_items", column, definition)
+    _ensure_column(db, "products", "price_eur", "REAL NOT NULL DEFAULT 0")
 
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:

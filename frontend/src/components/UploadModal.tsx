@@ -16,22 +16,21 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../api'
 import { useDialogFocus } from '../hooks/useDialogFocus'
-import type { OrderDetailData } from '../types'
+import { applyCatalogProduct, findCatalogProduct, suggestedDeliveryAddress, type ManualItem } from '../manualOrder'
+import type { Client, OrderDetailData, Product } from '../types'
+import { ClientCombobox } from './ClientCombobox'
+import { ProductCombobox } from './ProductCombobox'
 
 interface UploadModalProps {
   onClose: () => void
   onComplete: (order: OrderDetailData) => void
-}
-
-interface ManualItem {
-  description: string
-  quantity: number
-  unit_price: number
+  /** Catalog used by the manual product picker; empty means free text only. */
+  products?: Product[]
 }
 
 const emptyItem = (): ManualItem => ({ description: '', quantity: 1, unit_price: 0 })
 
-export function UploadModal({ onClose, onComplete }: UploadModalProps) {
+export function UploadModal({ onClose, onComplete, products = [] }: UploadModalProps) {
   const [mode, setMode] = useState<'pdf' | 'manual' | 'email'>('pdf')
   const [email, setEmail] = useState({ text: '', client: '', subject: '' })
   const [file, setFile] = useState<File | null>(null)
@@ -40,10 +39,19 @@ export function UploadModal({ onClose, onComplete }: UploadModalProps) {
   const errorRef = useRef<HTMLParagraphElement>(null)
   useEffect(() => { if (error) errorRef.current?.focus() }, [error])
   const dialogRef = useDialogFocus(onClose, busy)
+  const [clients, setClients] = useState<Client[]>([])
+  const clientsRequested = useRef(false)
+  // Saved clients feed the Customer dropdown; loaded once, the first time manual entry is opened. On failure it stays free text.
+  useEffect(() => {
+    if (mode !== 'manual' || clientsRequested.current) return
+    clientsRequested.current = true
+    api.clients().then(setClients).catch(() => setClients([]))
+  }, [mode])
   const [manual, setManual] = useState({
     order_number: '', client: '', vendor: 'Thought3D Ltd',
     order_date: new Date().toISOString().slice(0, 10), requested_date: '',
-    currency: 'USD', delivery_address: '', terms: '', notes: '', items: [emptyItem()],
+    // Catalog prices are stored in EUR, so manual orders default to EUR.
+    currency: 'EUR', delivery_address: '', terms: '', notes: '', items: [emptyItem()],
   })
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -92,6 +100,23 @@ export function UploadModal({ onClose, onComplete }: UploadModalProps) {
     ...current,
     items: current.items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item),
   }))
+  const pickProduct = (index: number, product: Product) => {
+    setManual(current => ({ ...current, items: current.items.map((item, itemIndex) => itemIndex === index ? applyCatalogProduct(item, product) : item) }))
+    // Move straight to the quantity (the only field left to type) so the next keystroke lands there.
+    const quantity = document.getElementById(`manual-qty-${index}`) as HTMLInputElement | null
+    quantity?.select()
+  }
+  const pickClient = (client: Client) => {
+    // Exact saved name (orders are linked to clients by name) and, only if empty, the client's delivery address.
+    setManual(current => ({ ...current, client: client.customer, delivery_address: suggestedDeliveryAddress(current.delivery_address, client) }))
+    const supplier = document.getElementById('manual-supplier') as HTMLInputElement | null
+    supplier?.focus()
+  }
+  const typeDescription = (index: number, text: string) => {
+    // Typing the exact catalog name also fills the catalog price; any other text is kept as free text.
+    const product = findCatalogProduct(products, text)
+    setManual(current => ({ ...current, items: current.items.map((item, itemIndex) => itemIndex !== index ? item : product ? { ...applyCatalogProduct(item, product), description: text } : { ...item, description: text }) }))
+  }
 
   return createPortal((
     <div className="modal-layer" role="dialog" aria-modal="true" aria-label="New order" aria-busy={busy}>
@@ -149,8 +174,8 @@ export function UploadModal({ onClose, onComplete }: UploadModalProps) {
             <div className="manual-context"><Mail size={18} /><span><b>Flexible entry</b><small>Copy the essential details from the email. You can review the full order next.</small></span></div>
             <div className="manual-fields">
               <label><span>Order number *</span><Input aria-required="true" aria-invalid={!!error && !manual.order_number.trim() || undefined} aria-describedby={error ? "new-order-error" : undefined} value={manual.order_number} onChange={(event) => setManual({ ...manual, order_number: event.target.value.toUpperCase() })} placeholder="PO-0000" /></label>
-              <label className="wide"><span>Customer *</span><Input aria-required="true" aria-invalid={!!error && !manual.client.trim() || undefined} aria-describedby={error ? "new-order-error" : undefined} value={manual.client} onChange={(event) => setManual({ ...manual, client: event.target.value })} placeholder="Customer company" /></label>
-              <label><span>Supplier</span><Input value={manual.vendor} onChange={(event) => setManual({ ...manual, vendor: event.target.value })} /></label>
+              <label className="wide"><span>Customer *</span><ClientCombobox aria-required="true" aria-invalid={!!error && !manual.client.trim() || undefined} aria-describedby={error ? "new-order-error" : undefined} value={manual.client} clients={clients} onChange={text => setManual(current => ({ ...current, client: text }))} onSelect={pickClient} placeholder={clients.length ? 'Search saved clients or type a customer' : 'Customer company'} /></label>
+              <label><span>Supplier</span><Input id="manual-supplier" value={manual.vendor} onChange={(event) => setManual({ ...manual, vendor: event.target.value })} /></label>
               <label><span>Order date</span><Input type="date" value={manual.order_date} onChange={(event) => setManual({ ...manual, order_date: event.target.value })} /></label>
               <label><span>Requested date</span><Input type="date" value={manual.requested_date} onChange={(event) => setManual({ ...manual, requested_date: event.target.value })} /></label>
               <label><span>Currency</span><select value={manual.currency} onChange={(event) => setManual({ ...manual, currency: event.target.value })}><option>USD</option><option>EUR</option><option>GBP</option></select></label>
@@ -159,11 +184,11 @@ export function UploadModal({ onClose, onComplete }: UploadModalProps) {
             </div>
             <div className="manual-items-title"><div><strong>Requested products</strong><span>We will use the description to match each product to the catalog.</span></div><button onClick={() => setManual({ ...manual, items: [...manual.items, emptyItem()] })}><Plus size={15} /> Add product</button></div>
             <div className="manual-item-list">
-              <div className="manual-item-head"><span>DESCRIPTION *</span><span>QTY.</span><span>PRICE</span><span>AMOUNT</span><span /></div>
+              <div className="manual-item-head"><span>DESCRIPTION *</span><span>QTY.</span><span>PRICE{manual.currency !== 'EUR' && products.length > 0 && <em className="manual-price-note" title="Catalog prices are in EUR">Catalog prices are in EUR</em>}</span><span>AMOUNT</span><span /></div>
               {manual.items.map((item, index) => (
                 <div className="manual-item" key={index}>
-                  <Input aria-label={`Product description ${index + 1}`} aria-required={index === 0 || undefined} aria-invalid={!!error && index === 0 && !manual.items.some(line => line.description.trim()) || undefined} aria-describedby={error ? "new-order-error" : undefined} value={item.description} onChange={(event) => updateItem(index, { description: event.target.value })} placeholder="Requested product" />
-                  <Input aria-label={`Product quantity ${index + 1}`} aria-invalid={!!error && (!Number.isInteger(item.quantity) || item.quantity < 1) || undefined} aria-describedby={error ? "new-order-error" : undefined} type="number" min="1" value={item.quantity} onChange={(event) => updateItem(index, { quantity: Number(event.target.value) })} />
+                  <ProductCombobox aria-label={`Product description ${index + 1}`} aria-required={index === 0 || undefined} aria-invalid={!!error && index === 0 && !manual.items.some(line => line.description.trim()) || undefined} aria-describedby={error ? "new-order-error" : undefined} value={item.description} products={products} onChange={text => typeDescription(index, text)} onSelect={product => pickProduct(index, product)} placeholder={products.length ? 'Search the catalog or type a product' : 'Requested product'} />
+                  <Input id={`manual-qty-${index}`} aria-label={`Product quantity ${index + 1}`} aria-invalid={!!error && (!Number.isInteger(item.quantity) || item.quantity < 1) || undefined} aria-describedby={error ? "new-order-error" : undefined} type="number" min="1" value={item.quantity} onChange={(event) => updateItem(index, { quantity: Number(event.target.value) })} />
                   <Input aria-label={`Product price ${index + 1}`} aria-invalid={!!error && (!Number.isFinite(item.unit_price) || item.unit_price < 0) || undefined} aria-describedby={error ? "new-order-error" : undefined} type="number" min="0" step="0.01" value={item.unit_price} onChange={(event) => updateItem(index, { unit_price: Number(event.target.value) })} />
                   <strong>{manual.currency} {(item.quantity * item.unit_price).toFixed(2)}</strong>
                   <button aria-label={`Remove product ${index + 1}`} disabled={manual.items.length === 1} onClick={() => setManual({ ...manual, items: manual.items.filter((_, itemIndex) => itemIndex !== index) })}><Trash2 size={15} /></button>

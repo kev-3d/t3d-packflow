@@ -13,6 +13,9 @@ services:
     environment:
       PACKFLOW_DB_PATH: /app/data/packflow.db
       PACKFLOW_SEED_REFERENCE_CATALOG: "${PACKFLOW_SEED_REFERENCE_CATALOG:-false}"
+      SLACK_WEBHOOK_URL: "${SLACK_WEBHOOK_URL:-}"
+      SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN:-}"
+      SLACK_CHANNEL_ID: "${SLACK_CHANNEL_ID:-}"
     ports:
       - "${PACKFLOW_API_PORT:-8001}:8001"
     volumes:

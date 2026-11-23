@@ -19,6 +19,7 @@ import { DeleteRequirementsDialog, EditRequirementDialog, requirementToInput } f
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
+import { WordmarkPagination } from './WordmarkPagination'
 
 const features = tableFeatures({
   columnVisibilityFeature,
@@ -247,12 +248,9 @@ export function ClientRequirements({ requirements, clients, loading, reload, not
           </TableBody>
         </Table>
       </div>
-      <div className="clients-pagination">
-        <span role="status">{filtered.length} of {requirements.length} companies · Page {pagination.pageIndex + 1} of {pageCount}</span>
-        <div>
-          <Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>Previous</Button>
-          <Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>Next</Button>
-        </div>
+      <div className="clients-pagination clients-pagination--wordmark">
+        <span role="status">{filtered.length} of {requirements.length} companies</span>
+        <WordmarkPagination label="Special requirements pages" pageIndex={pagination.pageIndex} pageCount={pageCount} onPageChange={(page) => table.setPageIndex(page)} />
       </div>
       {editing && <EditRequirementDialog requirement={editing} clients={clients} onClose={() => setEditing(null)} onSave={saveRequirement} />}
       {deleteTarget && <DeleteRequirementsDialog requirement={deleteTarget === true ? undefined : deleteTarget} count={requirements.length} busy={deleting} error={deleteError} onClose={() => setDeleteTarget(null)} onConfirm={confirmDelete} />}

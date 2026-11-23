@@ -1,7 +1,7 @@
 import { Gauge } from '../components/charts/gauge'
 import { Input } from '../components/ui/input'
 import { Button } from '../components/ui/button'
-import { AlertTriangle, ArrowLeft, Box, Check, ChevronDown, Download, FileCheck2, LoaderCircle, Package, Pencil, Plus, Save, Scale, Sparkles, Tag, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Box, Check, ChevronDown, Download, FileCheck2, LoaderCircle, Package, Pencil, Plus, Save, Scale, Sparkles, Tag, Trash2, Wallet } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, api } from '../api'
 import { BoxNavigation } from '../components/BoxNavigation'
@@ -14,14 +14,15 @@ import { BoxVisual } from '../components/BoxVisual'
 import { DHL_PANEL_ID, DhlShippingPanel, type DhlRateStatus } from '../components/DhlShippingPanel'
 import { colorForProduct } from '../components/box3d/sceneBuilder'
 import { ReviewProductsTable } from '../components/ReviewProductsTable'
+import { PackingObjectives } from '../components/PackingObjectives'
 import { fieldId, makeDraft, reviewPayload, serverIssues, validateReview, type DraftItem, type ReviewIssue } from '../review'
-import type { OrderDetailData, OrderItem, PackingResult, Product } from '../types'
+import type { AnalysisReport, OrderDetailData, OrderItem, PackingObjective, PackingResult, Product } from '../types'
 
 interface DetailProps {
   order: OrderDetailData
   onBack: () => void
   onRefresh: () => Promise<void>
-  onSaved: () => Promise<void>
+  onSaved: (slack?: AnalysisReport['slack_notification']) => Promise<void>
   notify: (message: string, error?: boolean) => void
 }
 
@@ -40,6 +41,7 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
   const exportMenuRef = useRef<HTMLDivElement>(null)
   const [dhlRate, setDhlRate] = useState<DhlRateStatus>({ state: 'loading' })
   const [operation, setOperation] = useState('')
+  const [pendingObjective, setPendingObjective] = useState<PackingObjective>()
   const [matchedItems, setMatchedItems] = useState(order.items)
   const [catalog, setCatalog] = useState<Product[]>()
   const [catalogError, setCatalogError] = useState(false)
@@ -118,18 +120,31 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
     } finally { setBusy(false); setOperation('') }
   }
 
+  const changeObjective = async (objective: PackingObjective) => {
+    setBusy(true); setPendingObjective(objective); setOperation('Recalculating the packing plan…')
+    try {
+      await api.analyzeOrder(order.id, objective)
+      await onRefresh()
+      setBoxIndex(0)
+      notify('Packing plan recalculated for the selected goal.')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'The packing plan could not be recalculated.', true)
+    } finally { setBusy(false); setPendingObjective(undefined); setOperation('') }
+  }
+
   const saveAndFinish = async () => {
     setBusy(true)
     setSavingPlan(true); setOperation('Saving the packing plan and PDF…')
+    let slack: AnalysisReport['slack_notification']
     try {
-      await api.savePackingPlan(order.id)
+      slack = (await api.savePackingPlan(order.id)).slack_notification
     } catch (error) {
       notify(error instanceof Error ? error.message : 'The packing plan could not be saved.', true)
       setBusy(false); setSavingPlan(false); setOperation('')
       return
     }
     setBusy(false); setSavingPlan(false); setOperation('')
-    await onSaved()
+    await onSaved(slack)
   }
 
   const exportExcel = async () => {
@@ -223,7 +238,7 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
       {preview && <RecommendationPreview preview={preview} currency={order.currency} busy={busy} error={previewError} onClose={() => setPreview(null)} onApply={applyPreview} />}
       <header className="detail-header">
         <button className="back-button" onClick={onBack}><ArrowLeft size={18} /> Orders</button>
-        <div className="detail-title"><span className="eyebrow">PACKING PLAN / {order.order_number}</span><h1>{order.client}</h1><p className="detail-order-value"><span>Order value</span><strong>{order.currency} {totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></p></div>
+        <div className="detail-title"><span className="eyebrow">PACKING PLAN / {order.order_number}</span><h1>{order.client}</h1></div>
         <div className="detail-actions">
           {order.plan && <Button className="button button--ghost" disabled={busy} onClick={toggleEditing}><Pencil size={16} /> {editing ? 'Cancel editing' : 'Edit details'}</Button>}
           {order.plan && <div className="export-menu" ref={exportMenuRef}>
@@ -287,8 +302,8 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
           {/* <h2 id="packing-performance-title" tabIndex={-1} className="results-heading">Packing performance</h2> */}
           <section className="plan-kpis" aria-labelledby="packing-performance-title">
             <article><span className="kpi-title"><Package aria-hidden="true" /> BOXES REQUIRED</span><strong>{result.box_count}<small> {result.box_count === 1 ? 'box' : 'boxes'}</small></strong></article>
-            <article><span className="kpi-title"><Box aria-hidden="true" /> TOTAL UTILIZATION <details className="metric-help"><summary aria-label="How total utilization is calculated">?</summary><p>Total packed product volume divided by the total volume of selected boxes. This is volume-weighted, not an average of box percentages. Unassigned units are excluded.</p></details></span><strong>{result.average_utilization}<small>%</small></strong></article>
             <article><span className="kpi-title"><Scale aria-hidden="true" /> GROSS WEIGHT</span><strong>{result.total_weight_kg}<small> kg</small></strong></article>
+            <article><span className="kpi-title"><Wallet aria-hidden="true" /> ORDER VALUE</span><strong><small>{order.currency} </small>{totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></article>
             <article className="dhl-rate-card">
               <button type="button" aria-controls={DHL_PANEL_ID} title="Show the DHL shipping details" onClick={() => {
                 const panel = document.getElementById(DHL_PANEL_ID) as HTMLDetailsElement | null
@@ -307,6 +322,7 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
             </article>
 
           </section>
+          {result.options?.length ? <PackingObjectives options={result.options} zone={result.dhl_zone ?? 1} zoneAssumed={result.dhl_zone_assumed ?? true} busy={busy} pending={pendingObjective} onSelect={changeObjective} /> : null}
           <section id="selected-box-details" className="packing-workbench pb-3" aria-labelledby={`select-box-${selectedBox.sequence}`}>
             <article className="panel box-selector-panel">
               <div className="box-switcher box-switcher--cards"><BoxNavigation boxes={result.boxes} selectedIndex={selectedIndex} onSelect={index => { setBoxIndex(index); setHighlightedProduct('') }} /></div>

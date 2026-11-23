@@ -10,7 +10,7 @@ import { Clients } from './pages/Clients'
 import { Dashboard } from './pages/Dashboard'
 import { OrderDetail } from './pages/OrderDetail'
 import { Orders } from './pages/Orders'
-import type { BoxType, DashboardData, OrderDetailData, OrderSummary, Page, Product } from './types'
+import type { AnalysisReport, BoxType, DashboardData, OrderDetailData, OrderSummary, Page, Product } from './types'
 
 function App() {
   const [page, setPage] = useState<Page>('dashboard')
@@ -84,12 +84,14 @@ function App() {
     await loadOverview()
   }
 
-  const finishPackingPlan = async () => {
+  const finishPackingPlan = async (slack?: AnalysisReport['slack_notification']) => {
     await loadOverview()
     setOrder(null)
     setPage('dashboard')
     window.scrollTo({ top: 0, behavior: 'smooth' })
-    notify('Overview refreshed.')
+    if (slack === 'sent') notify('Packing plan saved. Packing team notified on Slack.')
+    else if (slack === 'failed') notify('Packing plan saved, but the Slack notification could not be sent.', true)
+    else notify('Overview refreshed.')
   }
 
   const deleteOrders = async () => {
@@ -145,7 +147,7 @@ function App() {
         </>
       )}
       {loading && dashboard && <div className="route-loader" role="status" aria-label="Loading order"><LoaderCircle className="spin" /></div>}
-      {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} onComplete={(created) => { setUploadOpen(false); setOrder(created); setPage('order'); window.scrollTo({ top: 0, behavior: 'smooth' }); loadOverview().catch(() => notify('The order was created, but the overview could not be refreshed.', true)); notify(created.source_type === 'email' ? 'Email processed. Review the products and quantities before calculating.' : created.source_type === 'manual' ? 'Order created. Complete the review before calculating.' : 'PDF processed. Review the extracted details.')}} />}
+      {uploadOpen && <UploadModal products={products} onClose={() => setUploadOpen(false)} onComplete={(created) => { setUploadOpen(false); setOrder(created); setPage('order'); window.scrollTo({ top: 0, behavior: 'smooth' }); loadOverview().catch(() => notify('The order was created, but the overview could not be refreshed.', true)); notify(created.source_type === 'email' ? 'Email processed. Review the products and quantities before calculating.' : created.source_type === 'manual' ? 'Order created. Complete the review before calculating.' : 'PDF processed. Review the extracted details.')}} />}
       {deleteOpen && <DeleteOrdersDialog count={orders.length} busy={deleting} error={deleteError} onClose={() => setDeleteOpen(false)} onConfirm={deleteOrders} />}
       {orderToDelete && <DeleteOrdersDialog count={1} order={orderToDelete} busy={deleting} error={deleteError} onClose={() => setOrderToDelete(null)} onConfirm={deleteSingleOrder} />}
       {notice && <div role={notice.error ? 'alert' : 'status'} className={`toast ${notice.error ? 'toast--error' : ''}`}>{notice.error ? <AlertCircle size={18} /> : <CheckCircle2 size={18} />}<span>{notice.message}</span><button aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={15} /></button></div>}

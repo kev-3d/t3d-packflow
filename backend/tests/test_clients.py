@@ -51,6 +51,20 @@ class ClientsTest(unittest.TestCase):
         self.assertEqual(records[0]["shipping_address"], "Dock 4")
         self.assertEqual(len(errors), 1)
 
+    def test_parser_reads_bill_and_ship_address_headers(self):
+        # Header layout of the "Customer Contact List" export (row 1 empty, headers on row 2).
+        records, errors = parse_clients_excel(workbook_bytes([
+            [],
+            ["Customer", "Phone number", "Email", "Contact name", "Bill address", "Country", "Ship address"],
+            ["123 3D B.V.", "+31 294787127", "a@123-3d.test", "Rob", "Koningsbeltweg 52", "Netherlands", "Dock 7"],
+            [" Monday, 16 November 2026 09:15 AM GMT+01:00"],
+        ]))
+        self.assertEqual(len(records), 1)
+        self.assertEqual(errors, [])
+        self.assertEqual(records[0]["address"], "Koningsbeltweg 52")
+        self.assertEqual(records[0]["shipping_address"], "Dock 7")
+        self.assertEqual(records[0]["phone_number"], "+31 294787127")
+
     def test_parser_finds_header_below_title_block_and_keeps_address_lines(self):
         records, errors = parse_clients_excel(workbook_bytes([
             ["Thought3D Ltd"],

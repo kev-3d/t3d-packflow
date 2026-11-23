@@ -13,7 +13,11 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.pdfgen import canvas as pdf_canvas
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import (Flowable, Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table,
+                                TableStyle)
+
+from .box_views import FALLBACK, IsoBoxFlowable, LayerPlanFlowable, Unit, layer_span, layer_step, layers, product_palette
+from .country_style import country_code, country_color, flag_path
 
 LOGO_PATH = Path(__file__).parent / "assets" / "logo.jpg"
 
@@ -86,6 +90,7 @@ def build_shipment(order: dict[str, Any], *, exporter: dict[str, str] | None = N
             detail = details.get(str(item["sku"]), {})
             unit_weight = detail.get("weight_kg") or 0
             lines.append({
+                "sku": str(item["sku"]),
                 "code": product_code(detail),
                 "description": detail.get("description") or item["name"],
                 "quantity": item["quantity"],
@@ -99,8 +104,17 @@ def build_shipment(order: dict[str, Any], *, exporter: dict[str, str] | None = N
             "volume_m3": _round(length * width * height / 1_000_000, 4),
             "net_weight_kg": _round(box.get("product_weight_kg") or sum(l["net_weight_kg"] for l in lines), 2),
             "gross_weight_kg": _round(box["gross_weight_kg"], 2),
+            "utilization": box.get("utilization"),
             "lines": lines,
+            # Unit positions for the 3D packing guide (absent in old or synthetic plans).
+            "placements": box.get("placements") or [],
         })
+
+    products = {}
+    for sku, detail in details.items():
+        dims = [detail.get("length_cm"), detail.get("width_cm"), detail.get("height_cm")]
+        products[sku] = {"code": product_code(detail), "description": detail.get("description") or "",
+                         "dims": [float(v) for v in dims] if all(v for v in dims) else None}
 
     return {
         "order_number": order["order_number"],
@@ -111,6 +125,7 @@ def build_shipment(order: dict[str, Any], *, exporter: dict[str, str] | None = N
         "destination": destination,
         "dispatch": dispatch,
         "boxes": boxes,
+        "products": products,
         "totals": {
             "boxes": len(boxes),
             "units": sum(l["quantity"] for b in boxes for l in b["lines"]),
@@ -147,6 +162,160 @@ def _numbered_canvas(label: str):
             super().save()
 
     return NumberedCanvas
+
+
+GUIDE_LAYERS_PER_PAGE = 4
+
+
+class _CheckBox(Flowable):
+    """Empty square the packer ticks by hand."""
+
+    def __init__(self, size: float = 8):
+        super().__init__()
+        self.size = size
+
+    def wrap(self, *_):
+        return self.size, self.size
+
+    def draw(self):
+        self.canv.setStrokeColor(GRID)
+        self.canv.setLineWidth(0.8)
+        self.canv.rect(0, 0, self.size, self.size, stroke=1, fill=0)
+
+
+def _guide_pages(shipment: dict[str, Any], box: dict[str, Any], palette: dict[str, tuple],
+                 width: float, p) -> list[Any]:
+    """PACKING GUIDE page(s) for one box: 3D view, contents, steps and layer-by-layer plans."""
+    total = shipment["totals"]["boxes"]
+    products = shipment.get("products", {})
+    destination = country_code(shipment.get("destination", ""))
+    accent = country_color(destination)
+    small = ParagraphStyle("GuideSmall", fontName="Helvetica", fontSize=8, leading=10)
+    bold = ParagraphStyle("GuideBold", parent=small, fontName="Helvetica-Bold")
+    label = ParagraphStyle("GuideLabel", parent=small, fontName="Helvetica-Bold", fontSize=7, textColor=MUTED)
+    right = ParagraphStyle("GuideRight", parent=small, alignment=2)
+
+    def para(text: Any, style=small) -> Paragraph:
+        return Paragraph(escape(str(text)).replace("\n", "<br/>"), style)
+
+    units = [Unit.from_placement(pl) for pl in box.get("placements", [])]
+    plan_layers = layers(units)
+    chunks = [list(range(i, min(i + GUIDE_LAYERS_PER_PAGE, len(plan_layers))))
+              for i in range(0, len(plan_layers), GUIDE_LAYERS_PER_PAGE)] or [[]]
+
+    def header(continued: bool) -> Table:
+        badge = Table([[para(f"BOX {box['sequence']} / {total}",
+                             ParagraphStyle("Badge", fontName="Helvetica-Bold", fontSize=14, leading=16,
+                                            textColor=colors.white, alignment=1))]], colWidths=[3 * cm])
+        badge.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), accent),
+                                   ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+        flag = flag_path(destination)
+        right_cell = [badge] if not flag else Table([[Image(str(flag), width=0.9 * cm, height=0.6 * cm), badge]],
+                                                     colWidths=[1.1 * cm, 3 * cm])
+        if flag:
+            right_cell.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                            ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+        title = "PACKING GUIDE" + (" (continued)" if continued else "")
+        left_cell = [para(title, ParagraphStyle("GuideTitle", fontName="Helvetica-Bold", fontSize=15, leading=18,
+                                                textColor=NAVY)),
+                     para(f"Packing list {shipment['order_number']} · for the packing team · "
+                          f"{shipment['consignee'].get('name') or shipment['client']}", label)]
+        table = Table([[left_cell, right_cell]], colWidths=[width - 4.3 * cm, 4.3 * cm])
+        table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                                   ("LINEBELOW", (0, 0), (-1, 0), 1.5, NAVY),
+                                   ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                                   ("BOTTOMPADDING", (0, 0), (-1, -1), 7)]))
+        return table
+
+    def panel(title: str, rows: list[list[Any]], widths: list[float], extra=()) -> Table:
+        table = Table([[para(title, label)] + [""] * (len(widths) - 1), *rows], colWidths=widths)
+        table.setStyle(TableStyle([("SPAN", (0, 0), (-1, 0)), ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#B4B2A9")),
+                                   ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                   ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                                   ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                                   *extra]))
+        return table
+
+    side_w = width * 0.4
+    dims = " × ".join(f"{v:g}" for v in box["dimensions_cm"])
+    info_rows = [[para("Type"), para(box["box_code"], ParagraphStyle("B1", parent=bold, alignment=2))],
+                 [para("Inside size"), para(f"{dims} cm", ParagraphStyle("B2", parent=bold, alignment=2))],
+                 [para("Gross weight"), para(f"{box['gross_weight_kg']:.2f} kg", ParagraphStyle("B3", parent=bold, alignment=2))]]
+    if box.get("utilization") is not None:
+        info_rows.append([para("Volume used"), para(f"{box['utilization']}%", ParagraphStyle("B4", parent=bold, alignment=2))])
+    info = panel("BOX", info_rows, [side_w * .45, side_w * .55])
+
+    legend_rows, legend_style = [], []
+    for row, line in enumerate(box["lines"], start=1):
+        swatch = palette.get(line.get("sku"), FALLBACK)
+        legend_rows.append(["", para(" ".join(v for v in [line["code"], line["description"]] if v)),
+                            para(str(line["quantity"]), ParagraphStyle("Q", parent=bold, alignment=2))])
+        legend_style += [("BACKGROUND", (0, row), (0, row), swatch[0]), ("BOX", (0, row), (0, row), 0.6, swatch[3])]
+    units_total = sum(line["quantity"] for line in box["lines"])
+    legend = panel(f"CONTENTS · {units_total} units", legend_rows, [0.35 * cm, side_w - 1.55 * cm, 1.2 * cm],
+                   [("LEFTPADDING", (0, 1), (0, -1), 0), ("RIGHTPADDING", (0, 1), (0, -1), 0)] + legend_style)
+
+    steps = [layer_step(i + 1, layer, products)[0] for i, layer in enumerate(plan_layers)]
+    steps.append(f"Fill gaps, close the box and stick label {box['sequence']}/{total} on the front")
+    step_rows = [[_CheckBox(), para(f"{i}. {text}")] for i, text in enumerate(steps, start=1)]
+    steps_panel = panel("STEPS", step_rows, [0.45 * cm, side_w - 0.45 * cm])
+
+    if units:
+        view: Any = IsoBoxFlowable(box, palette, width - side_w - 0.4 * cm, 7.6 * cm)
+    else:
+        view = para("3D layout not available for this box: the packing plan was saved without unit positions. "
+                    "Recalculate the order to get it.", small)
+    main = Table([[[para("3D VIEW · the finished box", label), view], [info, Spacer(1, 6), legend, Spacer(1, 6), steps_panel]]],
+                 colWidths=[width - side_w, side_w])
+    main.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
+                              ("BOX", (0, 0), (0, 0), 0.5, colors.HexColor("#B4B2A9")),
+                              ("LEFTPADDING", (1, 0), (1, 0), 0.4 * cm), ("RIGHTPADDING", (1, 0), (1, 0), 0),
+                              ("TOPPADDING", (0, 0), (-1, -1), 4)]))
+
+    def layer_grid(indexes: list[int]) -> Table:
+        cell_w = (width - 0.4 * cm) / 2
+        # Bigger plans when the page only holds one row of them.
+        plan_h = 6.8 * cm if len(indexes) <= 2 else 4.3 * cm
+        cells = []
+        for i in indexes:
+            layer = plan_layers[i]
+            title, detail = layer_step(i + 1, layer, products)
+            head = Table([[_CheckBox(), para(f"Layer {i + 1} · {layer_span(plan_layers, i)}", bold),
+                           para(title.split(": ", 1)[1], right)]],
+                         colWidths=[0.45 * cm, cell_w * .45, cell_w * .55 - 0.45 * cm - 12])
+            head.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                      ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+            cells.append([head, LayerPlanFlowable(box, plan_layers, i, palette, cell_w - 12, plan_h),
+                          para(detail, label)])
+        rows = [cells[k:k + 2] + [""] * (2 - len(cells[k:k + 2])) for k in range(0, len(cells), 2)]
+        grid = Table(rows, colWidths=[cell_w + 0.2 * cm, cell_w + 0.2 * cm])
+        commands = [("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]
+        for r, row in enumerate(rows):
+            for col, cell in enumerate(row):
+                if cell:
+                    commands.append(("BOX", (col, r), (col, r), 0.5, colors.HexColor("#B4B2A9")))
+        grid.setStyle(TableStyle(commands))
+        return grid
+
+    sign = Table([[para("Packed by", label), para("Checked by", label), para("Date", label)]],
+                 colWidths=[width / 3] * 3)
+    sign.setStyle(TableStyle([("LINEABOVE", (0, 0), (0, 0), 0.8, GRID), ("LINEABOVE", (1, 0), (1, 0), 0.8, GRID),
+                              ("LINEABOVE", (2, 0), (2, 0), 0.8, GRID),
+                              ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 12)]))
+
+    story: list[Any] = []
+    for page, indexes in enumerate(chunks):
+        story += [PageBreak(), header(page > 0), Spacer(1, 8)]
+        if page == 0:
+            story += [main, Spacer(1, 10)]
+        if indexes:
+            story += [para("LAYER BY LAYER · seen from above, front edge at the bottom, bottom layer first", label),
+                      Spacer(1, 4), layer_grid(indexes)]
+        if page == len(chunks) - 1:
+            story += [Spacer(1, 18), sign]
+    return story
 
 
 def render_packing_list_pdf(shipment: dict[str, Any]) -> bytes:
@@ -233,9 +402,8 @@ def render_packing_list_pdf(shipment: dict[str, Any]) -> bytes:
         ("LEFTPADDING", (0, 0), (-1, -1), 7), ("RIGHTPADDING", (0, 0), (-1, -1), 7),
     ]))
 
-    columns = [("Box No.", .07), ("Product Code", .13), ("Description of Goods", .27), ("Unit Qty", .08),
-               ("Type of Pkg", .10), ("Net Weight (Kg)", .1), ("Gross Weight (Kg)", .1),
-               ("Measurements (m³)", .15)]
+    columns = [("Box No.", .07), ("Product Code", .14), ("Description of Goods", .35), ("Unit Qty", .08),
+               ("Type of Pkg", .16), ("Net Weight (Kg)", .1), ("Gross Weight (Kg)", .1)]
     rows: list[list[Any]] = [[p(name, "head") for name, _ in columns]]
     style_cmds: list[tuple] = []
     for index, box in enumerate(shipment["boxes"]):
@@ -248,10 +416,9 @@ def render_packing_list_pdf(shipment: dict[str, Any]) -> bytes:
                 p(line["code"], "cell"),
                 p(line["description"], "cell"),
                 p(line["quantity"], "num"),
-                p(box["box_code"] if first else "", "num"),
+                p(f"{box['box_code']}\n{dims} cm" if first else "", "num"),
                 p(f"{line['net_weight_kg']:.2f}", "num"),
                 p(f"{box['gross_weight_kg']:.2f}" if first else "", "num"),
-                p(f"{box['volume_m3']:.4f}\n{dims} cm" if first else "", "num"),
             ])
         if index % 2:
             style_cmds.append(("BACKGROUND", (0, start), (-1, len(rows) - 1), BOX_SHADE))
@@ -259,8 +426,7 @@ def render_packing_list_pdf(shipment: dict[str, Any]) -> bytes:
     total_row = len(rows)
     rows.append([p("Consignment Total", "total_label"), "", "", p(totals["units"], "total"),
                  p(f"{totals['boxes']} box{'es' if totals['boxes'] != 1 else ''}", "total"),
-                 p(f"{totals['net_weight_kg']:.2f}", "total"), p(f"{totals['gross_weight_kg']:.2f}", "total"),
-                 p(f"{totals['volume_m3']:.4f}", "total")])
+                 p(f"{totals['net_weight_kg']:.2f}", "total"), p(f"{totals['gross_weight_kg']:.2f}", "total")])
     goods = Table(rows, colWidths=[width * share for _, share in columns], repeatRows=1)
     goods.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), NAVY),
@@ -281,8 +447,7 @@ def render_packing_list_pdf(shipment: dict[str, Any]) -> bytes:
     summary = (f"Total no. of boxes: {totals['boxes']}\n"
                f"Total units: {totals['units']}\n"
                f"Total net weight: {totals['net_weight_kg']:.2f} kg\n"
-               f"Total gross weight: {totals['gross_weight_kg']:.2f} kg\n"
-               f"Total volume: {totals['volume_m3']:.4f} m³")
+               f"Total gross weight: {totals['gross_weight_kg']:.2f} kg")
     footer = Table([[
         [p("Additional Info", "label"), p(summary)],
         [p("Signatory Company", "label"), p(exporter["company"], "strong"), Spacer(1, 6),
@@ -299,6 +464,10 @@ def render_packing_list_pdf(shipment: dict[str, Any]) -> bytes:
 
     story = [p("PACKING LIST", "title"), Spacer(1, 10), header, Spacer(1, 12), goods,
              Spacer(1, 12), footer]
+    # One packing guide page per box (more if a box has over GUIDE_LAYERS_PER_PAGE layers).
+    palette = product_palette(shipment)
+    for box in shipment["boxes"]:
+        story += _guide_pages(shipment, box, palette, width, p)
     document.build(story, canvasmaker=_numbered_canvas(
         f"{exporter['company']} | Packing list {shipment['order_number']}"))
     return stream.getvalue()

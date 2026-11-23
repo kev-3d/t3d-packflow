@@ -591,14 +591,25 @@ CLIENT_FIELDS = (
     "address", "country", "shipping_address",
 )
 
+_EXPORT_TIMESTAMP = re.compile(
+    r"^(mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s+.*\d{4}.*\d{1,2}:\d{2}", re.IGNORECASE,
+)
+
+
+def _is_export_timestamp_row(record: dict[str, str]) -> bool:
+    """A footer like "Monday, 16 November 2026 09:15 AM GMT+01:00" with no other client data."""
+    others = any(value for field, value in record.items() if field != "customer")
+    return not others and bool(_EXPORT_TIMESTAMP.match(record.get("customer", "")))
+
+
 _CLIENT_HEADER_ALIASES = {
     "customer": {"customer", "client", "cliente", "customer name", "company"},
     "phone_number": {"phone number", "phone", "telephone", "telefono", "tel"},
     "email": {"email", "e-mail", "email address", "correo"},
     "contact_name": {"contact name", "contact", "contacto"},
-    "address": {"address", "direccion", "billing address"},
+    "address": {"address", "direccion", "billing address", "bill address", "bill to"},
     "country": {"country", "pais"},
-    "shipping_address": {"shipping address", "ship to", "delivery address", "direccion de envio"},
+    "shipping_address": {"shipping address", "ship address", "ship to", "delivery address", "direccion de envio"},
 }
 
 
@@ -666,8 +677,8 @@ def parse_clients_excel(content: bytes) -> tuple[list[dict[str, str]], list[str]
             if field in columns and columns[field] < len(row) else ""
             for field in CLIENT_FIELDS
         }
-        # Skip blank rows and footers (e.g. an export timestamp) outside the client columns.
-        if not any(record.values()):
+        # Skip blank rows and footers (e.g. an export timestamp), even when the footer sits in the Customer column.
+        if not any(record.values()) or _is_export_timestamp_row(record):
             continue
         if not record["customer"]:
             errors.append(f"Row {row_number}: Customer is empty.")

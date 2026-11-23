@@ -29,11 +29,15 @@ from .dhl_surcharges import REGION_LABELS, load_surcharges
 from .extraction import (
     extract_email, extract_pdf, parse_catalog_excel, parse_clients_excel, parse_reference_workbook,
 )
+from .packing import DEFAULT_OBJECTIVE as DEFAULT_PACKING_OBJECTIVE
+from .packing import OBJECTIVES as PACKING_OBJECTIVES
 from .packing import fill_existing_plan, pack_order
 from .requirements_routes import requirements_note_for, router as requirements_router
 from .labels import render_box_labels_pdf
 from .reports import render_analysis_pdf
 from .shipping_docs import DEFAULT_EXPORTER, build_shipment, render_packing_list_pdf
+from .env import load_env
+from .slack_notify import notify_plan_ready
 
 
 class ProductPayload(BaseModel):
@@ -42,6 +46,7 @@ class ProductPayload(BaseModel):
     width_cm: float = Field(gt=0)
     height_cm: float = Field(gt=0)
     weight_kg: float = Field(gt=0)
+    price_eur: float = Field(default=0, ge=0)
     rotation_allowed: bool = True
     fragile: bool = False
 
@@ -133,6 +138,66 @@ def _internal_product_code(name: str) -> str:
     return f"PRODUCT-{digest}"
 
 
+_PRODUCT_VARIANTS = (
+    "original", "supergrip", "ppgf", "pp", "pa", "pc", "flex", "metal", "ht", "abs", "pva",
+)
+
+
+def _product_family(normalized: str) -> str | None:
+    """Classify a normalized product name into a packaging family."""
+    words = set(normalized.split())
+    if "glide" in words and "roller" in words:
+        return "glide_roller"
+    if "glide" in words and ("kit" in words or "kits" in words):
+        return "glide_kit"
+    if "prokit" in words or re.search(r"\bpro kit\b", normalized):
+        return "pro_kit"
+    if "glide" in words or re.search(r"\b250ml\b", normalized):
+        return "glide_250ml"
+    for size in ("120ml", "50ml", "10ml"):
+        if re.search(rf"\b{size}\b", normalized):
+            return f"bottle_{size}"
+    if "magigoo" in words and not re.search(r"\d+ml\b", normalized):
+        return "bottle_50ml"
+    if re.fullmatch(r"\d+ml", normalized):
+        return f"bottle_{normalized}"
+    return None
+
+
+def _product_variant(normalized: str) -> str | None:
+    for word in normalized.split():
+        if word in _PRODUCT_VARIANTS:
+            return word
+    return None
+
+
+def _match_by_family_and_variant(
+    products: list[sqlite3.Row], target: str
+) -> sqlite3.Row | None:
+    """Match PO wording such as 'MAGIGOO Glide 250ml - Supergrip' to one catalog product.
+
+    Works for a catalog with one product per variant ('Magigoo Supergrip Glide 250ml') and
+    for a generic one ('glide bottle 250ml'). A description naming a variant never falls
+    back to a different variant; without a variant it takes the generic product, else Original.
+    """
+    family = _product_family(target)
+    if family is None:
+        return None
+    variant = _product_variant(target)
+    in_family = [
+        (product, _product_variant(name))
+        for product in products
+        for name in [_normalize_product_name(product["name"])]
+        if _product_family(name) == family
+    ]
+    wanted = [variant, None] if variant else [None, "original"]
+    for candidate in wanted:
+        match = next((product for product, v in in_family if v == candidate), None)
+        if match is not None:
+            return match
+    return None
+
+
 def _find_product_by_description(
     db: sqlite3.Connection, description: str
 ) -> sqlite3.Row | None:
@@ -148,6 +213,10 @@ def _find_product_by_description(
     )
     if exact:
         return exact
+
+    family_match = _match_by_family_and_variant(products, target)
+    if family_match is not None:
+        return family_match
 
     product_names = {
         _normalize_product_name(product["name"]): product for product in products
@@ -305,7 +374,30 @@ def _refresh_order_totals(db: sqlite3.Connection, order_id: int) -> None:
     )
 
 
-def _run_plan(db: sqlite3.Connection, order_id: int) -> dict[str, Any]:
+def _packing_zone(db: sqlite3.Connection, order_id: int) -> int | None:
+    """DHL zone used to rank plans by shipping cost: the saved quote's destination, else
+    the destination detected from the order and client data."""
+    quote = get_shipping_quote(db, order_id)
+    code = ((quote or {}).get("inputs") or {}).get("destination")
+    try:
+        if code:
+            return int(dhl_pricing.zone_for(str(code))["zone"])
+        detected = _detect_order_destination(db, order_id)
+        return int(detected["zone"]) if detected else None
+    except (dhl_pricing.PricingError, KeyError, TypeError, ValueError):
+        return None
+
+
+def _current_objective(db: sqlite3.Connection, order_id: int) -> str:
+    plan = latest_plan(db, order_id)
+    objective = ((plan or {}).get("result") or {}).get("objective")
+    return objective if objective in PACKING_OBJECTIVES else DEFAULT_PACKING_OBJECTIVE
+
+
+def _run_plan(db: sqlite3.Connection, order_id: int, objective: str | None = None) -> dict[str, Any]:
+    objective = objective or _current_objective(db, order_id)
+    if objective not in PACKING_OBJECTIVES:
+        raise HTTPException(422, f"Unknown packing objective {objective!r}.")
     _relink_order_items(db, order_id)
     total_items = db.execute(
         "SELECT COUNT(*) FROM order_items WHERE order_id = ?", (order_id,)
@@ -334,11 +426,15 @@ def _run_plan(db: sqlite3.Connection, order_id: int) -> dict[str, Any]:
         raise HTTPException(422, "There are no active box types.")
     primary_items = [item for item in items if not item["is_suggested"]]
     additions = [item for item in items if item["is_suggested"]]
-    result = pack_order(primary_items, boxes)
+    result = pack_order(primary_items, boxes, objective, _packing_zone(db, order_id))
     if additions:
         if result["status"] != "complete":
             raise HTTPException(422, "The original order does not fit. Review the additional products.")
-        result = fill_existing_plan(result, items, additions)
+        base = result
+        result = fill_existing_plan(base, items, additions)
+        # Additions go into the existing boxes, so the objective comparison still applies.
+        for key in ("objective", "objective_label", "dhl_zone", "dhl_zone_assumed", "options"):
+            result[key] = base[key]
         if result["status"] != "complete":
             raise HTTPException(422, "The additional products do not fit in the original order’s boxes.")
     result["product_recommendations"] = _fill_recommendations(
@@ -381,6 +477,7 @@ def _ensure_demo_plans() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    load_env(prefix="SLACK_")  # Local uvicorn runs; Compose already injects these.
     init_db()
     _ensure_demo_plans()
     yield
@@ -719,11 +816,13 @@ def review_order(order_id: int, payload: OrderReviewPayload) -> dict[str, Any]:
 
 
 @app.post("/api/orders/{order_id}/analyze")
-def analyze_order(order_id: int) -> dict[str, Any]:
+def analyze_order(order_id: int, objective: str | None = None) -> dict[str, Any]:
+    """Calculate the packing plan. ``objective``: fewest_boxes, lowest_dhl_cost or
+    smallest_volume; omitted, the order keeps the objective of its latest plan."""
     with connect() as db:
         if not db.execute("SELECT 1 FROM orders WHERE id = ?", (order_id,)).fetchone():
             raise HTTPException(404, "Order not found.")
-        return _run_plan(db, order_id)
+        return _run_plan(db, order_id, objective)
 
 
 @app.get("/api/orders/{order_id}/source.pdf")
@@ -888,7 +987,9 @@ def _save_analysis_report(order_id: int) -> dict[str, Any]:
 
 @app.post("/api/orders/{order_id}/reports", status_code=201)
 def save_analysis_report(order_id: int) -> dict[str, Any]:
-    return _save_analysis_report(order_id)
+    """Save & Finish: store the final PDF and tell the packing team on Slack."""
+    report = _save_analysis_report(order_id)
+    return {**report, "slack_notification": notify_plan_ready(get_order(order_id))}
 
 
 @app.get("/api/orders/{order_id}/reports")
@@ -1206,13 +1307,13 @@ def create_product(payload: ProductPayload) -> dict[str, Any]:
             cursor = db.execute(
                 """
                 INSERT INTO products
-                    (sku, name, length_cm, width_cm, height_cm, weight_kg,
+                    (sku, name, length_cm, width_cm, height_cm, weight_kg, price_eur,
                      rotation_allowed, fragile, active, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                 """,
                 (
                     _internal_product_code(payload.name), payload.name, payload.length_cm,
-                    payload.width_cm, payload.height_cm, payload.weight_kg,
+                    payload.width_cm, payload.height_cm, payload.weight_kg, payload.price_eur,
                     int(payload.rotation_allowed), int(payload.fragile), now_iso(),
                 ),
             )
@@ -1241,6 +1342,59 @@ def create_box(payload: BoxPayload) -> dict[str, Any]:
         except sqlite3.IntegrityError as exc:
             raise HTTPException(409, "This box code already exists.") from exc
         return dict(db.execute("SELECT * FROM box_types WHERE id = ?", (cursor.lastrowid,)).fetchone())
+
+
+@app.put("/api/catalog/products/{product_id}")
+def update_product(product_id: int, payload: ProductPayload) -> dict[str, Any]:
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(422, "The product name is required.")
+    with connect() as db:
+        if db.execute("SELECT 1 FROM products WHERE id = ?", (product_id,)).fetchone() is None:
+            raise HTTPException(404, "Product not found.")
+        normalized = _normalize_product_name(name)
+        for other in db.execute("SELECT id, name FROM products WHERE id != ?", (product_id,)):
+            if _normalize_product_name(other["name"]) == normalized:
+                raise HTTPException(409, "A product with this name already exists.")
+        # The SKU stays the same so order lines and saved plans keep pointing at this product.
+        db.execute(
+            """
+            UPDATE products SET name = ?, length_cm = ?, width_cm = ?, height_cm = ?,
+                weight_kg = ?, price_eur = ?, rotation_allowed = ?, fragile = ?
+            WHERE id = ?
+            """,
+            (
+                name, payload.length_cm, payload.width_cm, payload.height_cm,
+                payload.weight_kg, payload.price_eur, int(payload.rotation_allowed),
+                int(payload.fragile), product_id,
+            ),
+        )
+        return dict(db.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone())
+
+
+@app.put("/api/catalog/boxes/{box_id}")
+def update_box(box_id: int, payload: BoxPayload) -> dict[str, Any]:
+    code, name = payload.code.strip().upper(), payload.name.strip()
+    if not code or not name:
+        raise HTTPException(422, "The box code and name are required.")
+    with connect() as db:
+        if db.execute("SELECT 1 FROM box_types WHERE id = ?", (box_id,)).fetchone() is None:
+            raise HTTPException(404, "Box type not found.")
+        try:
+            db.execute(
+                """
+                UPDATE box_types SET code = ?, name = ?, length_cm = ?, width_cm = ?,
+                    height_cm = ?, empty_weight_kg = ?, max_weight_kg = ?
+                WHERE id = ?
+                """,
+                (
+                    code, name, payload.length_cm, payload.width_cm, payload.height_cm,
+                    payload.empty_weight_kg, payload.max_weight_kg, box_id,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(409, "This box code already exists.") from exc
+        return dict(db.execute("SELECT * FROM box_types WHERE id = ?", (box_id,)).fetchone())
 
 
 @app.delete("/api/catalog/products/{product_id}")

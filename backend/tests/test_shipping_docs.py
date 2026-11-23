@@ -107,7 +107,7 @@ class PackingListTests(unittest.TestCase):
         self.assertEqual(pages, shipment["totals"]["boxes"])
         total = shipment["totals"]["boxes"]
         for box in shipment["boxes"]:
-            self.assertIn(f"BOX {box['sequence']} / {total}", text)
+            self.assertIn(f"BOX {box['sequence']}/{total}", text)
         self.assertIn(shipment["boxes"][0]["lines"][0]["code"], text)
         self.assertIn("Synthetic GmbH", text)
 
@@ -139,6 +139,64 @@ class PackingListTests(unittest.TestCase):
         text, pages = pdf_text(render_box_labels_pdf(shipment, 1))
         self.assertEqual(pages, 1)
         self.assertIn("more line(s) - see packing list", text)
+
+    def test_packing_list_has_a_3d_guide_page_per_box(self):
+        order = self.make_order()
+        shipment = _shipment_for(order["id"])
+        reader = PdfReader(io.BytesIO(export_packing_list(order["id"]).body))
+        pages = [page.extract_text() or "" for page in reader.pages]
+        total = shipment["totals"]["boxes"]
+        self.assertEqual(len(pages), 1 + total)
+        self.assertNotIn("Measurements", pages[0])
+        self.assertNotIn("Total volume", pages[0])
+        self.assertIn("PACKING LIST", pages[0])
+        for box, text in zip(shipment["boxes"], pages[1:]):
+            self.assertTrue(box["placements"])
+            for expected in ["PACKING GUIDE", f"BOX {box['sequence']} / {total}", "3D VIEW", "Layer 1",
+                             "FRONT", "Packed by"]:
+                self.assertIn(expected, text)
+
+    def test_guide_without_positions_still_renders(self):
+        shipment = build_shipment(self.synthetic_order(lines=2, boxes=1))
+        text, pages = pdf_text(render_packing_list_pdf(shipment))
+        self.assertEqual(pages, 2)
+        self.assertIn("3D layout not available", text)
+
+    def test_from_and_to_are_never_truncated(self):
+        name = "Very Long Consignee Name International Trading Company GmbH & Co. KG"
+        address = ("c/o Versandmanufaktur GmbH, Logistikzentrum Nord, Halle 7, Tor 12\n"
+                   "Sinterstraße 9-11, Gewerbegebiet Am Kanal\n44795 Bochum\nGermany")
+        shipment = build_shipment(self.synthetic_order(lines=3), destination="Germany",
+                                  consignee={"name": name, "address": address,
+                                             "phone": "+49 234 1234567", "email": "logistics.inbound@example-company.de"})
+        text, pages = pdf_text(render_box_labels_pdf(shipment, 1))
+        flat = " ".join(text.split())
+        self.assertEqual(pages, 1)
+        for part in [*name.split(), "Logistikzentrum", "Gewerbegebiet", "Bochum", "+49 234 1234567",
+                     "Qormi,", "QRM 4000"]:
+            self.assertIn(part, flat)
+        self.assertIn("logistics.inbound@", flat.replace(" ", ""))
+
+    def test_country_colors_are_unique_and_readable(self):
+        from app.country_style import COUNTRY_COLORS, PALETTE, color_hex
+
+        def luminance(hex_color):
+            channels = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+        self.assertEqual(len(set(COUNTRY_COLORS.values())), len(COUNTRY_COLORS))
+        for color in set(PALETTE) | set(COUNTRY_COLORS.values()):
+            self.assertGreaterEqual(1.05 / (luminance(color) + 0.05), 4.5, color)  # white text, WCAG AA
+        self.assertEqual(color_hex("ZZ"), color_hex("zz"))  # stable fallback
+
+    def test_destination_flag_assets_exist(self):
+        from app.country_style import COUNTRY_COLORS
+        from app.labels import FLAGS_DIR, country_code
+        for code in COUNTRY_COLORS:
+            self.assertTrue((FLAGS_DIR / f"{code.lower()}.png").exists(), code)
+        self.assertEqual(country_code("United States"), "US")
+        self.assertEqual(country_code("United Kingdom"), "GB")
 
     @staticmethod
     def synthetic_order(lines=8, boxes=8, long_names=False):

@@ -79,7 +79,30 @@ export interface PackedBox {
   placements: Placement[]
 }
 
+export type PackingObjective = 'fewest_boxes' | 'lowest_dhl_cost' | 'smallest_volume'
+
+export interface PackingOption {
+  objective: PackingObjective
+  label: string
+  selected: boolean
+  complete: boolean
+  box_count: number
+  total_volume_l: number
+  utilization: number
+  gross_weight_kg: number
+  chargeable_kg: number
+  tariff_weight_kg: number
+  handling_eur: number
+  estimated_dhl_eur: number
+  boxes: { box_code: string; box_name: string; count: number }[]
+}
+
 export interface PackingResult {
+  objective?: PackingObjective
+  objective_label?: string
+  dhl_zone?: number
+  dhl_zone_assumed?: boolean
+  options?: PackingOption[]
   status: string
   box_count: number
   unit_count: number
@@ -145,6 +168,7 @@ export interface AnalysisReport {
   filename: string
   created_at: string
   download_url: string
+  slack_notification?: 'sent' | 'skipped' | 'failed'
 }
 
 export interface Product {
@@ -154,6 +178,7 @@ export interface Product {
   width_cm: number
   height_cm: number
   weight_kg: number
+  price_eur: number
   rotation_allowed: number
   fragile: number
   active: number

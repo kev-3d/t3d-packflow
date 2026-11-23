@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0D2B4A"/>
+      <stop offset="1" stop-color="#1A5383"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#32C4F3" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#32C4F3" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="front" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F0B56C"/>
+      <stop offset="1" stop-color="#DC9A50"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <circle cx="512" cy="330" r="360" fill="url(#glow)"/>
+
+  <!-- Sparkles -->
+  <g fill="#FFFFFF">
+    <path d="M150 170 l14 38 38 14 -38 14 -14 38 -14 -38 -38 -14 38 -14z" opacity=".9"/>
+    <path d="M870 250 l10 26 26 10 -26 10 -10 26 -10 -26 -26 -10 26 -10z" opacity=".8"/>
+    <path d="M120 520 l8 20 20 8 -20 8 -8 20 -8 -20 -20 -8 20 -8z" opacity=".6"/>
+    <path d="M900 560 l8 20 20 8 -20 8 -8 20 -8 -20 -20 -8 20 -8z" opacity=".6"/>
+    <circle cx="250" cy="90" r="7" opacity=".7"/>
+    <circle cx="800" cy="110" r="6" opacity=".7"/>
+  </g>
+
+  <!-- Idea rays -->
+  <g stroke="#FFD54F" stroke-width="22" stroke-linecap="round">
+    <line x1="512" y1="95" x2="512" y2="48" transform="rotate(-64 512 300)"/>
+    <line x1="512" y1="95" x2="512" y2="48" transform="rotate(-32 512 300)"/>
+    <line x1="512" y1="95" x2="512" y2="48"/>
+    <line x1="512" y1="95" x2="512" y2="48" transform="rotate(32 512 300)"/>
+    <line x1="512" y1="95" x2="512" y2="48" transform="rotate(64 512 300)"/>
+  </g>
+
+  <!-- Ground shadow -->
+  <ellipse cx="512" cy="962" rx="290" ry="24" fill="#000" opacity=".28"/>
+
+  <g stroke="#3A2414" stroke-width="16" stroke-linejoin="round" stroke-linecap="round">
+    <!-- Back flap -->
+    <polygon points="312,680 712,680 690,620 334,620" fill="#C98840"/>
+    <!-- Box interior -->
+    <polygon points="282,720 742,720 712,680 312,680" fill="#8A5527"/>
+  </g>
+
+  <!-- Thought3D bulb (logo) rising from the box -->
+  <circle cx="512" cy="300" r="158" fill="#EAF9FF"/>
+  <path d="M432 190 A120 120 0 0 1 520 170" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" opacity=".9"/>
+  <g fill="none" stroke="#32C4F3" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M407 440 A175 175 0 1 1 617 440"/>
+    <path d="M400 300 H624"/>
+    <path d="M512 300 V440"/>
+    <path d="M425 492 H591"/>
+    <path d="M425 536 H591 V580 H425"/>
+    <path d="M428 632 H591 A81.5 55 0 0 1 428 632 Z"/>
+  </g>
+
+  <g stroke="#3A2414" stroke-width="16" stroke-linejoin="round" stroke-linecap="round">
+    <!-- Side flaps -->
+    <polygon points="282,720 312,680 214,636 168,686" fill="#E3A35A"/>
+    <polygon points="742,720 712,680 810,636 856,686" fill="#E3A35A"/>
+    <!-- Box front -->
+    <rect x="282" y="720" width="460" height="222" rx="22" fill="url(#front)"/>
+    <!-- Front flap folded down -->
+    <polygon points="282,720 742,720 762,778 262,778" fill="#D18F48"/>
+  </g>
+
+  <!-- Face -->
+  <g>
+    <ellipse cx="432" cy="840" rx="24" ry="32" fill="#3A2414"/>
+    <ellipse cx="592" cy="840" rx="24" ry="32" fill="#3A2414"/>
+    <circle cx="440" cy="828" r="9" fill="#FFFFFF"/>
+    <circle cx="600" cy="828" r="9" fill="#FFFFFF"/>
+    <ellipse cx="380" cy="884" rx="30" ry="17" fill="#F2837A" opacity=".75"/>
+    <ellipse cx="644" cy="884" rx="30" ry="17" fill="#F2837A" opacity=".75"/>
+    <path d="M462 876 Q512 922 562 876" fill="none" stroke="#3A2414" stroke-width="14" stroke-linecap="round"/>
+  </g>
+</svg>
