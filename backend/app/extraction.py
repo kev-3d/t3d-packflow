@@ -5,10 +5,12 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, Callable, Iterable
 
 from openpyxl import load_workbook
 from pypdf import PdfReader
+
+from .po_lexicon import lexicon, normalize_token
 
 
 HEADER_ALIASES = {
@@ -33,6 +35,11 @@ HEADER_ALIASES = {
 # and splits each row into cells. Order lines are then accepted only when the
 # numbers agree arithmetically (quantity x unit price = amount). Anything that
 # cannot be verified is kept as a warning, never silently dropped or invented.
+#
+# Wording is not in this file. Labels ("PO Number", "Bill To", "Total qty"), column
+# names, company suffixes and currencies live in po_lexicon.json, so a new supplier
+# wording is a data change. A labelled value is read from the same cell, the cell to
+# its right or the cell under it, and is kept only if it has the expected shape.
 # ---------------------------------------------------------------------------
 
 ROW_TOLERANCE = 3.0        # pt: fragments this close vertically share a visual row
@@ -41,41 +48,37 @@ CHAR_WIDTH = 4.6           # pt: approximate glyph advance, used to place unposi
 FOOTER_MARGIN = 60.0       # pt: rows this close to the bottom edge are page furniture
 AMOUNT_TOLERANCE = 0.02
 
+STRAY_LINE_DISTANCE = 30.0  # pt: a wrapped line placed this far from its own row was mispositioned by pypdf
+STRAY_LINE_STEP = 11.0      # pt: where such a line is put back, one text line below its row
+
+LABEL_BELOW_DISTANCE = 30.0    # pt: a value printed under its label sits within this distance
+LABEL_COLUMN_TOLERANCE = 25.0  # pt: ...and starts this close to the label's x (or within the label's width)
+TERMS_CONTINUATION = 15.0      # pt: a terms value that wraps continues on the next line, this close
+
 NUMBER_WORD = re.compile(r"^\d+(?:[.,]\d+)*$")
-IDENTIFIER_WORD = re.compile(r"^(?:\d{8,}|[A-Z]{1,6}\d{3,})$")  # EAN or manufacturer code
+IDENTIFIER_WORD = re.compile(r"^(?:\d{8,}|[A-Z]{1,6}\d{3,}(?:-[A-Z0-9]+)*)$")  # EAN or manufacturer code
+MANUFACTURER_CODE = re.compile(r"^[A-Z]{1,6}\d{3,}(?:-[A-Z0-9]+)*$")
+ITEM_CODE = re.compile(r"^(?=[A-Z0-9-]*\d)[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$")  # "MG-50", "PK-100"
 DATE_PATTERN = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b")
+ISO_DATE = re.compile(r"\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b")
+TEXT_DATE_DAY_FIRST = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?[\s./-]+([^\W\d_]{3,10})\.?,?[\s./-]+(\d{4})\b")
+TEXT_DATE_MONTH_FIRST = re.compile(r"\b([^\W\d_]{3,10})\.?[\s./-]+(\d{1,2})(?:st|nd|rd|th)?,?[\s./-]+(\d{4})\b")
 ITEM_NUMBER = re.compile(r"^(\d{1,3})\s+\S")
 SKU_BRACKET = re.compile(r"\[([A-Za-z0-9][A-Za-z0-9-]*)\]")
-TAX_LABEL = re.compile(r"\b(?:TVA|VAT)\s*\d+(?:[.,]\d+)?\s*%", re.IGNORECASE)
-TOTALS_START = re.compile(
-    r"^(?:sub\s*total|subtotal|total\s+net|net\s+total|montant\s+ht|total\s+ht|total\b|notes?\b|terms?\s*:|page\b)",
-    re.IGNORECASE,
+TAX_LABEL = re.compile(r"\b(?:TVA|VAT|IVA|GST|MwSt|Tax)\s*\d+(?:[.,]\d+)?\s*%", re.IGNORECASE)
+PAGE_FURNITURE = re.compile(
+    r"^(?:page|pagina|página|seite)\s*:?\s*\d+(?:\s*(?:of|/|de|von|di|sur)\s*\d+)?$", re.IGNORECASE
 )
-SUBTOTAL_LINE = re.compile(r"^(?:sub\s*total|subtotal|total\s+net|net\s+total|montant\s+ht|total\s+ht)\b", re.IGNORECASE)
-TAX_LINE = re.compile(r"^(?:tva|vat|tax|taxes)\b", re.IGNORECASE)
-TOTAL_LINE = re.compile(r"^total\b(?!\s+(?:net|ht)\b)", re.IGNORECASE)
-DATE_LABEL = re.compile(r"^(?:order\s+)?date\b(?!\s+de\s+la\s+demande)", re.IGNORECASE)
-ORDER_NUMBER_PATTERNS = (
-    re.compile(
-        r"\b(?:order\s*(?:no|number|nr)\.?|bon de commande|purchase order|commande|po\s*(?:#|no\.?))\s*(?:#|n[°º]\.?)?\s*:?\s*#?\s*"
-        r"((?:[A-Za-z]{1,6}-?)?\d[\w-]*)",
-        re.IGNORECASE,
-    ),
-    re.compile(r"#\s*((?:[A-Za-z]{1,6}-?)?\d[\w-]*)"),
+ADDRESS_LINE_GAP = 20.0   # pt: a larger vertical gap ends an address block
+ADDRESS_COLUMN = 12.0     # pt: address lines start this close to the label's x
+ADDRESS_MAX_LINES = 6
+
+HEADER_FIELDS = (
+    "order_number", "order_date", "requested_date", "client", "billing_address", "delivery_address",
+    "vendor", "terms", "notes",
 )
-# Company names are case-sensitive on purpose: "kg" or "ag..." must not look like a legal suffix.
-COMPANY_SUFFIX = re.compile(r"\b(?:GmbH|Ltd|Inc|LLC|SAS|SARL|KG|Corp|Limited|Technologies|Labs)\b")
-CLIENT_SUFFIX = re.compile(r"\b(?:GmbH|Ltd|Inc|LLC|SAS|SARL|KG|Corp|Limited|Technologies|Labs)\b|\b3D")
-CLIENT_EXCLUDE = re.compile(
-    r"thought3d|address|adresse|invoice|delivery|deliver|expédition|vendor|buyer|contact|"
-    r"purchase order|bon de commande|terms|payment|\bein\b|\bvat\b|\btva\b|\bdate\b",
-    re.IGNORECASE,
-)
-HEADER_WORDS = {
-    "description", "désignation", "designation", "item", "qty", "quantité", "qté", "quantite",
-    "price", "rate", "prix", "unitaire", "amount", "montant", "total", "rem", "taxes", "tax",
-    "manufacturer", "ean", "pos", "unit", "date", "demande", "purchase", "no",
-}
+TOTAL_FIELDS = ("subtotal", "tax", "total", "quantity_total")
+PRICE_COLUMNS = {"unit_price", "amount"}
 
 
 @dataclass
@@ -116,6 +119,7 @@ def _base_result(filename: str, text: str) -> dict[str, Any]:
         "text": text,
         "items": [],
         "warnings": [],
+        "field_sources": {},
     }
 
 
@@ -135,10 +139,34 @@ def _page_fragments(page: Any) -> list[_Cell]:
     return fragments
 
 
+def _is_unplaced(fragment: _Cell) -> bool:
+    return abs(fragment.x) < 0.01 and abs(fragment.y) < 0.01
+
+
+def _restore_wrapped_lines(fragments: list[_Cell]) -> list[_Cell]:
+    """Put back wrapped lines that pypdf placed far away from their row.
+
+    Some generators draw a cell's second line ("adhesive" under "Magigoo Pro PC - The 3D printing")
+    with a line-feed operator that pypdf mispositions by dozens of points, so it lands inside a later
+    table row. Such a line is recognisable in the content stream: the positioned fragments before and
+    after it belong to one row, and it alone is far from that row. It is moved just below that row.
+    """
+    positioned = [index for index, fragment in enumerate(fragments) if not _is_unplaced(fragment)]
+    restored = list(fragments)
+    for order, index in enumerate(positioned[1:-1], start=1):
+        before = fragments[positioned[order - 1]]
+        after = fragments[positioned[order + 1]]
+        fragment = fragments[index]
+        row_y = max(before.y, after.y)
+        if abs(before.y - after.y) <= 8 and abs(fragment.y - row_y) > STRAY_LINE_DISTANCE:
+            restored[index] = _Cell(fragment.x, min(before.y, after.y) - STRAY_LINE_STEP, fragment.text)
+    return restored
+
+
 def _layout_rows(fragments: list[_Cell]) -> list[_Row]:
     """Group fragments into visual rows (top to bottom) and split each row into cells."""
     placed: list[_Cell] = []
-    for fragment in fragments:
+    for fragment in _restore_wrapped_lines(fragments):
         if abs(fragment.x) < 0.01 and abs(fragment.y) < 0.01:
             # pypdf could not place this text; it follows the previous fragment in the stream.
             if not placed:
@@ -185,8 +213,18 @@ def _is_amount_word(word: str) -> bool:
     return bool(NUMBER_WORD.match(word)) and not IDENTIFIER_WORD.match(word)
 
 
+def _is_size(words: list[str], index: int) -> bool:
+    """'250' in '250 ml' is part of the product name, not a quantity or price column."""
+    following = normalize_token(words[index + 1]) if index + 1 < len(words) else ""
+    return following in lexicon().measure_units
+
+
+def _column_numbers(words: list[str]) -> list[str]:
+    return [word for index, word in enumerate(words) if _is_amount_word(word) and not _is_size(words, index)]
+
+
 def _to_number(token: str, decimal: str) -> float:
-    compact = token.replace(" ", "").replace(" ", "")
+    compact = token.replace(" ", "").replace(" ", "")
     if decimal == ",":
         compact = compact.replace(".", "").replace(",", ".")
     else:
@@ -229,6 +267,46 @@ def _to_iso(parts: tuple[int, int, int], day_first: bool) -> str | None:
         return None
 
 
+def _valid_iso(year: int, month: int, day: int) -> str | None:
+    try:
+        return date(year, month, day).isoformat()
+    except ValueError:
+        return None
+
+
+def _cell_date(text: str) -> tuple[int, int, int] | str | None:
+    """The first date near the start of a text.
+
+    ISO ("2026-11-20") and written months ("23 Oct 2026", "October 23, 2026") are unambiguous and come
+    back as an ISO string; numeric "11/10/2026" comes back as (first, second, year) for the caller to
+    order by the document's format.
+    """
+    head = text[:40]
+    months = lexicon().months
+    found: list[tuple[int, tuple[int, int, int] | str]] = []
+    for match in ISO_DATE.finditer(head):
+        iso = _valid_iso(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        if iso:
+            found.append((match.start(), iso))
+            break
+    for match in DATE_PATTERN.finditer(head):
+        found.append((match.start(), (int(match.group(1)), int(match.group(2)), int(match.group(3)))))
+        break
+    for match in TEXT_DATE_DAY_FIRST.finditer(head):
+        month = months.get(normalize_token(match.group(2)))
+        iso = month and _valid_iso(int(match.group(3)), month, int(match.group(1)))
+        if iso:
+            found.append((match.start(), iso))
+            break
+    for match in TEXT_DATE_MONTH_FIRST.finditer(head):
+        month = months.get(normalize_token(match.group(1)))
+        iso = month and _valid_iso(int(match.group(3)), month, int(match.group(2)))
+        if iso:
+            found.append((match.start(), iso))
+            break
+    return min(found, key=lambda item: item[0])[1] if found else None
+
+
 def _solve_line(values: list[float]) -> tuple[int, float, float, float] | None:
     """Find (quantity, unit price, amount, discount %) among a row's numbers so that quantity x price = amount.
 
@@ -255,6 +333,249 @@ def _solve_line(values: list[float]) -> tuple[int, float, float, float] | None:
     return None
 
 
+# -- labelled values ---------------------------------------------------------------------------
+
+
+def _label_value(
+    rows: list[_Row], index: int, cell: _Cell, remainder: str, accept: Callable[[str], str | None], below: bool,
+) -> tuple[str, str] | None:
+    """The value of a label: after it in the same cell, in the next cell of the row, or under it."""
+    if remainder:
+        value = accept(remainder)
+        return (value, "same cell") if value else None
+    row = rows[index]
+    following = [other for other in row.cells if other.x > cell.x]
+    if following:
+        value = accept(following[0].text)
+        if value:
+            return value, "right"
+    if not below:
+        return None
+    width = max(len(cell.text) * CHAR_WIDTH, LABEL_COLUMN_TOLERANCE)
+    for other_row in rows[index + 1:index + 4]:
+        if not 0 < row.y - other_row.y <= LABEL_BELOW_DISTANCE:
+            break
+        for other in other_row.cells:
+            if cell.x - LABEL_COLUMN_TOLERANCE <= other.x <= cell.x + width:
+                value = accept(other.text)
+                if value:
+                    return value, "below"
+    return None
+
+
+def _find_field(
+    rows: list[_Row], fields: Iterable[str], accept: Callable[[str], str | None], *, anywhere: bool = True,
+) -> tuple[str, str] | None:
+    """(value, how it was found) for the first label of `fields` whose value passes `accept`.
+
+    Labels at the start of a cell are tried first; with `anywhere`, labels inside a sentence or a merged
+    cell ("SWEDEN Purchase order 674993") are tried next.
+    """
+    lex = lexicon()
+    fields = tuple(fields)
+    for inside in ((False, True) if anywhere else (False,)):
+        for index, row in enumerate(rows):
+            for cell in row.cells:
+                hit = lex.find_label(cell.text, fields, anywhere=inside)
+                if not hit:
+                    continue
+                # A document title ("Purchase Order") is followed by its number, never by what is printed under it.
+                below = not inside and not lex.is_title(cell.text)
+                found = _label_value(rows, index, cell, hit.remainder, accept, below)
+                if found:
+                    return found[0], f"label '{hit.synonym}' ({found[1]})"
+    return None
+
+
+def _accept_order_number(text: str) -> str | None:
+    words = text.split()
+    if not words:
+        return None
+    token = words[0].strip(":#,;()[]").rstrip(".")
+    if not 3 <= len(token) <= 30 or not re.search(r"\d", token):
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9/_.-]*", token) or _cell_date(token):
+        return None
+    return token.upper()
+
+
+def _accept_date(text: str) -> str | None:
+    return text if _cell_date(text) else None
+
+
+def _accept_name(text: str) -> str | None:
+    """A company or person name: has a real word, is not an address, contact line or label."""
+    lex = lexicon()
+    value = re.split(r"\s+\|\s+", text)[0].strip(" -,:")
+    if not value or len(value) > 80 or not re.search(r"[^\W\d_]{3,}", value):
+        return None
+    if "@" in value or re.search(r"\bwww\.|https?:", value, re.IGNORECASE):
+        return None
+    if lex.is_excluded_client(value) or lex.find_label(value, HEADER_FIELDS):
+        return None
+    return value
+
+
+def _accept_client(text: str) -> str | None:
+    value = _accept_name(text)
+    return value if value and not lexicon().is_own_company(value) else None
+
+
+def _labeled_block(rows: list[_Row], fields: tuple[str, ...]) -> str:
+    """The lines written under (or after) a label such as "Delivery address:", in the label's column."""
+    lex = lexicon()
+    for index, row in enumerate(rows):
+        for cell in row.cells:
+            hit = lex.find_label(cell.text, fields)
+            if not hit:
+                continue
+            lines = [hit.remainder] if hit.remainder else []
+            previous_y = row.y
+            for other_row in rows[index + 1:]:
+                if not 0 < previous_y - other_row.y <= ADDRESS_LINE_GAP or len(lines) >= ADDRESS_MAX_LINES:
+                    break
+                line = next((other.text for other in other_row.cells if abs(other.x - cell.x) <= ADDRESS_COLUMN), None)
+                if line is None or line.rstrip().endswith(":"):
+                    break
+                lines.append(line.strip())
+                previous_y = other_row.y
+            if lines:
+                return "\n".join(lines)
+    return ""
+
+
+def _vendor_block_texts(rows: list[_Row]) -> set[str]:
+    """Texts under a "Supplier"/"Vendor" label: they name the seller, never the customer."""
+    lex = lexicon()
+    texts: set[str] = set()
+    for index, row in enumerate(rows):
+        for cell in row.cells:
+            hit = lex.find_label(cell.text, ("vendor",))
+            if not hit:
+                continue
+            if hit.remainder:  # "Vendor: Other Supplier Ltd"
+                texts.update({cell.text, hit.remainder})
+                continue
+            texts.update(other.text for other in row.cells if other.x > cell.x)  # "Vendor:" | "Other Supplier Ltd"
+            previous_y = row.y
+            for other_row in rows[index + 1:index + 1 + ADDRESS_MAX_LINES]:
+                if not 0 < previous_y - other_row.y <= ADDRESS_LINE_GAP:
+                    break
+                texts.update(other.text for other in other_row.cells if abs(other.x - cell.x) <= ADDRESS_COLUMN)
+                previous_y = other_row.y
+    return texts
+
+
+def _find_client(rows: list[_Row]) -> tuple[str, str]:
+    """(client name, how it was found).
+
+    1. A legal-entity name ("... GmbH & Co. KG", "... Nordic AB") that is not ours and not under the
+       supplier label: it beats a bare brand, as some sender lines only show "3Dmensionals".
+    2. The value of a customer label ("Customer", "Sold To", "Bill To").
+    3. The letterhead: a purchase order is issued by the customer, so the first name at the top of the
+       document that is not a title, a label, an address or our own company.
+    """
+    lex = lexicon()
+    vendor_texts = _vendor_block_texts(rows)
+    for row in rows:
+        for cell in row.cells:
+            if cell.text in vendor_texts:
+                continue
+            for segment in re.split(r"\s+\|\s+", cell.text):
+                segment = segment.strip(" -,")
+                if segment in vendor_texts:
+                    continue
+                if lex.has_company_suffix(segment) and _accept_client(segment):
+                    return segment, "company name"
+    found = _find_field(rows, ("client", "billing_address"), _accept_client, anywhere=False)
+    if found:
+        return found
+    for row in rows[:8]:
+        for cell in row.cells:
+            for segment in re.split(r"\s+\|\s+", cell.text):
+                segment = segment.strip(" -,")
+                if not segment or segment[0].isdigit() or lex.is_title(segment) or segment in vendor_texts:
+                    continue
+                name = _accept_client(segment)
+                if name:
+                    return name, "letterhead"
+    return "", ""
+
+
+def _find_vendor(rows: list[_Row], text: str) -> tuple[str, str]:
+    lex = lexicon()
+    if lex.is_own_company(text):
+        return lex.own_company_name, "own company"
+    found = _find_field(rows, ("vendor",), _accept_name, anywhere=False)
+    return found if found else ("", "")
+
+
+def _find_terms(rows: list[_Row]) -> str:
+    lex = lexicon()
+    for index, row in enumerate(rows):
+        for cell in row.cells:
+            hit = lex.find_label(cell.text, ("terms",))
+            if not hit:
+                continue
+            value = [hit.remainder] if hit.remainder else []
+            if not value:
+                value = [other.text for other in row.cells if other.x > cell.x][:1]
+            if index + 1 < len(rows) and 0 < row.y - rows[index + 1].y <= TERMS_CONTINUATION:
+                for other in rows[index + 1].cells:
+                    # Continuation words sit to the right of the label, not under the left-hand address block.
+                    if cell.x - 2 <= other.x <= cell.x + 220 and not re.match(r"^(?:ein|vat|tva|tel)\b", other.text, re.IGNORECASE):
+                        value.append(other.text)
+            return " ".join(part for part in value if part)
+    return ""
+
+
+def _find_notes(rows: list[_Row]) -> str:
+    lex = lexicon()
+    for index, row in enumerate(rows):
+        hit = lex.find_label(row.cells[0].text, ("notes",)) if row.cells else None
+        if not hit:
+            continue
+        rest = " ".join([hit.remainder] + [cell.text for cell in row.cells[1:]]).strip()
+        if rest:
+            return rest
+        if index + 1 < len(rows):
+            return rows[index + 1].text.strip()
+    return ""
+
+
+def _currency(preferred: str, text: str) -> str | None:
+    """The currency named most often, first among the totals and then in the whole document."""
+    currencies = lexicon().currencies
+    for zone in (preferred, text):
+        counts: dict[str, int] = {}
+        for code, markers in currencies.items():
+            count = 0
+            for marker in markers:
+                if marker.isalpha():
+                    count += len(re.findall(rf"(?<![A-Za-z]){re.escape(marker)}(?![A-Za-z])", zone))
+                else:
+                    count += zone.count(marker)
+            counts[code] = count
+        best = max(counts, key=lambda code: counts[code])  # ties keep the order of po_lexicon.json
+        if counts[best]:
+            return best
+    return None
+
+
+# -- the item table ----------------------------------------------------------------------------
+
+
+def _column_fields(row: _Row) -> set[str]:
+    """Column names in a row; a row with figures is data, never a header."""
+    if any(_is_amount_word(word) for word in row.text.split()):
+        return set()
+    return lexicon().column_fields(row.text)
+
+
+def _is_header(row: _Row) -> bool:
+    return len(_column_fields(row)) >= 2
+
+
 def _is_item_start(row: _Row) -> bool:
     text = row.text
     if SKU_BRACKET.match(text):
@@ -264,24 +585,69 @@ def _is_item_start(row: _Row) -> bool:
     return len([word for word in text.split()[1:] if _is_amount_word(word)]) >= 2
 
 
-def _is_header(row: _Row) -> bool:
+def _is_table_item_start(row: _Row, quantity_only: bool) -> bool:
+    """Inside a table, a line may also start with its product code ("MG-50  50 ml  60  9.50  570.00")."""
+    if _is_item_start(row):
+        return True
     words = row.text.split()
-    labels = {word.lower().strip(".:()#") for word in words}
-    return len(labels & HEADER_WORDS) >= 2 and not any(_is_amount_word(word) for word in words)
+    if not words or not (MANUFACTURER_CODE.match(words[0]) or ITEM_CODE.match(words[0])):
+        return False
+    return len(_column_numbers(words[1:])) >= (1 if quantity_only else 2)
 
 
-def _item_blocks(rows: list[_Row]) -> tuple[list[list[_Row]], int, int]:
-    """Return (item blocks, index of the first item row, index where the table ends)."""
+def _is_quantity_only(fields: set[str]) -> bool:
+    """A table whose header has a quantity column but no price or amount column (a price-less PO)."""
+    return "quantity" in fields and not fields & PRICE_COLUMNS
+
+
+def _table_header_index(rows: list[_Row]) -> int | None:
+    """The first column-header row that names a quantity column and is followed by an item row."""
+    for index, row in enumerate(rows):
+        fields = _column_fields(row)
+        if "quantity" in fields and len(fields) >= 2:
+            quantity_only = _is_quantity_only(fields)
+            if any(_is_table_item_start(later, quantity_only) for later in rows[index + 1:]):
+                return index
+    return None
+
+
+def _is_table_end(row: _Row) -> bool:
+    """A totals line with a figure ("Sub Total 975.50", "Total qty 1.955,00") or a notes/terms label.
+
+    Only the first cell counts, so "TVA 20%" inside a line, or a description that starts with
+    "Total", never ends the table.
+    """
+    if not row.cells:
+        return False
+    lex = lexicon()
+    first = row.cells[0].text
+    hit = lex.find_label(first, TOTAL_FIELDS)
+    if hit:
+        rest = " ".join([hit.remainder] + [cell.text for cell in row.cells[1:]])
+        return _amount_on_line(rest, ".") is not None
+    return lex.find_label(first, ("notes", "terms")) is not None
+
+
+def _item_blocks(rows: list[_Row], start: int = 0, quantity_only: bool = False) -> tuple[list[list[_Row]], int, int]:
+    """Return (item blocks, index of the first item row, index where the table ends).
+
+    Scanning starts at ``start`` (the row after the table header when there is one), so an address
+    such as "211 24 MALMÖ ... 674993" above the table is never read as an order line.
+    """
+    in_table = start > 0
     blocks: list[list[_Row]] = []
     first_index = len(rows)
     end_index = len(rows)
-    for index, row in enumerate(rows):
-        if _is_item_start(row):
+    for index in range(start, len(rows)):
+        row = rows[index]
+        if PAGE_FURNITURE.match(row.text.strip()):
+            continue  # "Page 1 of 2" between the lines of a multi-page table
+        if _is_table_item_start(row, quantity_only) if in_table else _is_item_start(row):
             if not blocks:
                 first_index = index
             blocks.append([row])
             continue
-        if blocks and TOTALS_START.match(row.text):
+        if blocks and _is_table_end(row):
             end_index = index
             break
         if blocks and not _is_header(row):
@@ -294,30 +660,81 @@ def _item_title(block: list[_Row]) -> str:
     if ITEM_NUMBER.match(block[0].text):
         first_words = first_words[1:]
     words: list[str] = []
-    for word in first_words:
-        if _is_amount_word(word) or DATE_PATTERN.search(word) or ":" in word or "%" in word:
+    for position, word in enumerate(first_words):
+        token = normalize_token(word)
+        tax_word = token in {"tva", "vat", "iva", "gst", "mwst"}
+        skippable = IDENTIFIER_WORD.match(word) or SKU_BRACKET.fullmatch(word) or tax_word
+        if _is_amount_word(word) and _is_size(first_words, position):
+            words.append(word)  # "250 ml" belongs to the description, even as its first word
+            continue
+        if not words and (skippable or _is_amount_word(word) or ITEM_CODE.match(word)):
+            continue  # internal item IDs, EAN and codes printed before the description
+        if _is_amount_word(word) or DATE_PATTERN.search(word) or ":" in word or "%" in word or word in {"€", "$", "£"}:
             break  # the numeric columns start here
-        if IDENTIFIER_WORD.match(word) or SKU_BRACKET.fullmatch(word) or word.lower() in {"tva", "vat"}:
+        if skippable:
             continue
         words.append(word)
     title = " ".join(words)
     if not title and len(block) > 1:
         title = block[1].text
+    elif title:
+        # A wrapped description continues on the next row in lower case ("... The 3D printing" / "adhesive").
+        for row in block[1:]:
+            text = row.text.strip()
+            if len(row.cells) != 1 or not text[:1].islower() or re.search(r"\d", text):
+                break
+            title = f"{title} {text}"
     if title.count("(") > title.count(")") and len(block) > 1 and ")" in block[1].text:
         title = f"{title} {block[1].text.split(')')[0]})"  # keep "(Printing Adhesive)" whole
     return title.strip()
 
 
+def _item_code(first_row: _Row, numbered: bool) -> str:
+    """The SKU in brackets, else the first manufacturer code on the line ("MPC2018", "MGK2025-SG"),
+    else a hyphenated code that opens the line ("MG-50")."""
+    bracket = SKU_BRACKET.search(first_row.text)
+    if bracket:
+        return bracket.group(1).upper()
+    words = first_row.text.split()[1:] if numbered else first_row.text.split()
+    code = next((word for word in words if MANUFACTURER_CODE.match(word)), "")
+    if not code and words and ITEM_CODE.match(words[0]):
+        code = words[0]
+    return code
+
+
+def _parse_quantity_only_item(block: list[_Row], line_number: int) -> tuple[dict[str, Any] | None, list[str]]:
+    """A line of a price-less PO: the quantity is the last whole number of the line's first row."""
+    words = block[0].text.split()[1:] if ITEM_NUMBER.match(block[0].text) else block[0].text.split()
+    quantities = _column_numbers(words)
+    quantity = None
+    if quantities:
+        token = re.sub(r"[.,]0+$", "", quantities[-1])  # "150,00" is 150
+        if token.isdigit() and int(token) > 0:
+            quantity = int(token)
+    if quantity is None:
+        return None, [f"Line {line_number}: no quantity could be read, so the line was skipped."]
+    return {
+        "line_number": line_number,
+        "sku_raw": _item_code(block[0], ITEM_NUMBER.match(block[0].text) is not None),
+        "description": _item_title(block),
+        "quantity": quantity,
+        "unit_price": 0.0,
+        "requested_date": None,
+        "tax_label": "",
+        "discount_percent": 0.0,
+        "amount": 0.0,
+    }, []
+
+
 def _parse_item(block: list[_Row], decimal: str, day_first: bool, line_number: int) -> tuple[dict[str, Any] | None, list[str]]:
     warnings: list[str] = []
     numbered = ITEM_NUMBER.match(block[0].text) is not None
-    sku = SKU_BRACKET.search(block[0].text)
     values: list[str] = []
     for row_index, row in enumerate(block):
         words = row.text.split()
         if row_index == 0 and numbered:
             words = words[1:]  # the printed line number is not an amount
-        values.extend(word for word in words if _is_amount_word(word))
+        values.extend(_column_numbers(words))
     numbers = [_to_number(word, decimal) for word in values]
 
     solved = _solve_line(numbers)
@@ -338,7 +755,7 @@ def _parse_item(block: list[_Row], decimal: str, day_first: bool, line_number: i
 
     item = {
         "line_number": line_number,
-        "sku_raw": sku.group(1).upper() if sku else "",
+        "sku_raw": _item_code(block[0], numbered),
         "description": _item_title(block),
         "quantity": quantity,
         "unit_price": unit_price,
@@ -365,77 +782,21 @@ def _amount_on_line(text: str, decimal: str) -> float | None:
     return _to_number(found, decimal) if found else None
 
 
-def _labeled_date(rows: list[_Row]) -> tuple[int, int, int] | None:
-    for index, row in enumerate(rows):
-        if not DATE_LABEL.match(row.text):
+def _totals(rows: list[_Row], decimal: str) -> dict[str, float]:
+    """The first subtotal, tax, total and quantity total, each read from a line that starts with its label."""
+    lex = lexicon()
+    found: dict[str, float] = {}
+    for row in rows:
+        if not row.cells:
             continue
-        candidates = [row]
-        if index + 1 < len(rows):
-            candidates.append(rows[index + 1])
-        if index:
-            candidates.append(rows[index - 1])
-        for candidate in candidates:
-            parts = _date_parts(candidate.text)
-            if parts:
-                return parts[0]
-    return None
-
-
-def _find_order_number(rows: list[_Row]) -> str | None:
-    for pattern in ORDER_NUMBER_PATTERNS:
-        for row in rows:
-            match = pattern.search(row.text)
-            if match and re.search(r"\d", match.group(1)):
-                return match.group(1).upper()
-    return None
-
-
-def _find_client(rows: list[_Row]) -> str:
-    # A legal-entity name beats a bare brand: some sender lines only show "3Dmensionals".
-    for pattern in (COMPANY_SUFFIX, CLIENT_SUFFIX):
-        for row in rows:
-            for cell in row.cells:
-                if pattern.search(cell.text) and not CLIENT_EXCLUDE.search(cell.text):
-                    return re.split(r"\s+\|\s+", cell.text)[0].strip(" -,")
-    return ""
-
-
-def _find_terms(rows: list[_Row]) -> str:
-    for index, row in enumerate(rows):
-        for cell in row.cells:
-            match = re.match(r"terms?\s*:?\s*(.*)$", cell.text, re.IGNORECASE)
-            if not match:
-                continue
-            value = [match.group(1).strip()] if match.group(1).strip() else []
-            if index + 1 < len(rows):
-                for other in rows[index + 1].cells:
-                    # Continuation words sit to the right of the label, not under the left-hand address block.
-                    if cell.x - 2 <= other.x <= cell.x + 220 and not re.match(r"^(?:ein|vat|tva|tel)\b", other.text, re.IGNORECASE):
-                        value.append(other.text)
-            return " ".join(part for part in value if part)
-    return ""
-
-
-def _find_notes(rows: list[_Row]) -> str:
-    for index, row in enumerate(rows):
-        match = re.match(r"notes?\s*:?\s*(.*)$", row.text, re.IGNORECASE)
-        if not match:
+        hit = lex.find_label(row.cells[0].text, TOTAL_FIELDS)
+        if not hit or hit.field in found:
             continue
-        if match.group(1).strip():
-            return match.group(1).strip()
-        if index + 1 < len(rows):
-            return rows[index + 1].text.strip()
-    return ""
-
-
-def _currency(text: str) -> str | None:
-    if "€" in text or re.search(r"\bEUR\b", text):
-        return "EUR"
-    if "£" in text or re.search(r"\bGBP\b", text):
-        return "GBP"
-    if "$" in text or re.search(r"\bUSD\b", text):
-        return "USD"
-    return None
+        rest = " ".join([hit.remainder] + [cell.text for cell in row.cells[1:]])
+        value = _amount_on_line(rest, decimal)
+        if value is not None:
+            found[hit.field] = value
+    return found
 
 
 def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
@@ -443,38 +804,55 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
     rows = _document_rows(reader)
     text = "\n".join(row.text for row in rows)
     result = _base_result(filename, text)
+    sources: dict[str, str] = result["field_sources"]
     warnings: list[str] = []
 
-    blocks, first_index, end_index = _item_blocks(rows)
-    before = rows[:first_index]
+    header_index = _table_header_index(rows)
+    quantity_only = header_index is not None and _is_quantity_only(_column_fields(rows[header_index]))
+    blocks, first_index, end_index = _item_blocks(
+        rows, header_index + 1 if header_index is not None else 0, quantity_only
+    )
+    # The header zone (order number, dates, client) ends at the table header, or at the first line.
+    before = rows[:header_index] if header_index is not None else rows[:first_index]
     after = rows[end_index:] if blocks else rows
 
     decimal = _detect_decimal(text.split())
-    currency = _currency(text)
+    currency = _currency("\n".join(row.text for row in after), text)
     if currency is None:
-        warnings.append("Currency symbol not found; USD was used. Check the currency.")
+        if not quantity_only:
+            warnings.append("Currency symbol not found; USD was used. Check the currency.")
         currency = "USD"
+    else:
+        sources["currency"] = "currency marker"
     dates = _date_parts(text)
     day_first, ambiguous_format = _resolve_day_first(dates, currency)
 
     items: list[dict[str, Any]] = []
     for block in blocks:
-        item, item_warnings = _parse_item(block, decimal, day_first, len(items) + 1)
+        if quantity_only:
+            item, item_warnings = _parse_quantity_only_item(block, len(items) + 1)
+        else:
+            item, item_warnings = _parse_item(block, decimal, day_first, len(items) + 1)
         warnings.extend(item_warnings)
         if item:
             items.append(item)
 
-    order_number = _find_order_number(before) or _find_order_number(rows)
-    if order_number:
-        result["order_number"] = order_number
+    found = _find_field(before, ("order_number",), _accept_order_number) or _find_field(rows, ("order_number",), _accept_order_number)
+    if found:
+        result["order_number"], sources["order_number"] = found
     else:
         warnings.append("Order number not found; a temporary number was assigned.")
 
-    order_parts = _labeled_date(before)
-    if order_parts:
+    found = _find_field(before, ("order_date",), _accept_date) or _find_field(rows, ("order_date",), _accept_date)
+    order_parts = _cell_date(found[0]) if found else None
+    if isinstance(order_parts, str):
+        result["order_date"] = order_parts  # ISO and written-month dates are unambiguous
+        sources["order_date"] = found[1]
+    elif order_parts:
         order_date = _to_iso(order_parts, day_first)
         if order_date:
             result["order_date"] = order_date
+            sources["order_date"] = found[1]
             if ambiguous_format and order_parts[0] <= 12 and order_parts[1] <= 12:
                 warnings.append(
                     f"Order date {order_parts[0]:02d}/{order_parts[1]:02d}/{order_parts[2]} is ambiguous; "
@@ -483,42 +861,58 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
     else:
         warnings.append("Order date not found; today's date was used.")
 
-    client = _find_client(before)
+    client, how = _find_client(before)
     if client:
-        result["client"] = client
+        result["client"], sources["client"] = client, how
     else:
         warnings.append("Customer name not found; review the client before calculating.")
 
-    if "thought3d" in text.lower():
-        result["vendor"] = "Thought3D Ltd"
+    vendor, how = _find_vendor(before or rows, text)
+    if vendor:
+        result["vendor"], sources["vendor"] = vendor, how
 
     requested_dates = [item["requested_date"] for item in items if item["requested_date"]]
-    result["requested_date"] = min(requested_dates) if requested_dates else None
+    if requested_dates:
+        result["requested_date"] = min(requested_dates)
+        sources["requested_date"] = "item lines"
+    else:
+        found = _find_field(before, ("requested_date",), _accept_date, anywhere=False)
+        parts = _cell_date(found[0]) if found else None
+        requested = parts if isinstance(parts, str) else _to_iso(parts, day_first) if parts else None
+        if requested:
+            result["requested_date"], sources["requested_date"] = requested, found[1]
 
-    subtotal = tax = total = None
-    for row in after:
-        line = row.text
-        if subtotal is None and SUBTOTAL_LINE.match(line):
-            subtotal = _amount_on_line(line, decimal)
-        elif tax is None and TAX_LINE.match(line):
-            tax = _amount_on_line(line, decimal)
-        elif total is None and TOTAL_LINE.match(line):
-            total = _amount_on_line(line, decimal)
+    totals = _totals(after, decimal)
+    subtotal, tax, total = totals.get("subtotal"), totals.get("tax"), totals.get("total")
+    total_quantity = totals.get("quantity_total")
 
-    line_sum = round(sum(item["amount"] for item in items), 2)
-    if subtotal is None:
-        subtotal = line_sum
-        if items:
-            warnings.append("Subtotal not found; the sum of the lines was used.")
-    elif items and abs(line_sum - subtotal) > 0.05:
+    quantity_sum = sum(item["quantity"] for item in items)
+    if items and total_quantity is not None and abs(quantity_sum - total_quantity) > 0.01:
         warnings.append(
-            f"The lines add up to {line_sum:.2f}, but the document subtotal is {subtotal:.2f}. "
-            "Check the quantities and amounts."
+            f"The line quantities add up to {quantity_sum}, but the document total quantity is "
+            f"{total_quantity:g}. Check the quantities."
         )
-    tax = tax or 0.0
-    total = total if total is not None else round(subtotal + tax, 2)
-    if abs(subtotal + tax - total) > 0.05:
-        warnings.append(f"Subtotal plus tax ({subtotal + tax:.2f}) does not match the total ({total:.2f}).")
+
+    if quantity_only and subtotal is None and total is None:
+        # The document carries quantities only; there is no amount to reconcile.
+        subtotal = tax = total = 0.0
+        if items:
+            warnings.append("This purchase order has no prices; only quantities were read.")
+    else:
+        line_sum = round(sum(item["amount"] for item in items), 2)
+        if subtotal is None:
+            subtotal = line_sum
+            if items:
+                warnings.append("Subtotal not found; the sum of the lines was used.")
+        elif items and abs(line_sum - subtotal) > 0.05:
+            warnings.append(
+                f"The lines add up to {line_sum:.2f}, but the document subtotal is {subtotal:.2f}. "
+                "Check the quantities and amounts."
+            )
+        tax = tax or 0.0
+        total = total if total is not None else round(subtotal + tax, 2)
+        if abs(subtotal + tax - total) > 0.05:
+            warnings.append(f"Subtotal plus tax ({subtotal + tax:.2f}) does not match the total ({total:.2f}).")
 
     if not items:
         warnings.insert(0, "No product lines were found in this PDF. Check the document or add the lines manually.")
@@ -527,6 +921,8 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
         {
             "terms": _find_terms(before),
             "notes": _find_notes(after) or _find_notes(rows),
+            "delivery_address": _labeled_block(rows, ("delivery_address",)),
+            "billing_address": _labeled_block(rows, ("billing_address",)),
             "currency": currency,
             "subtotal": subtotal,
             "tax_amount": tax,
@@ -538,10 +934,6 @@ def extract_pdf(content: bytes, filename: str) -> dict[str, Any]:
     confidence = 0.95 if items else 0.2
     result["confidence"] = round(max(0.2, min(0.95, confidence - 0.1 * len(warnings))), 2)
     return result
-
-
-def _normalize_header(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
 def _header_map(headers: list[Any]) -> dict[str, int]:
@@ -718,11 +1110,66 @@ def _parse_mm_dimensions(value: Any) -> tuple[float, float, float] | None:
     return tuple(round(float(number) / 10, 3) for number in numbers[:3])
 
 
+# Box maximum weight for workbook imports; the sheet has no column for it. The DHL
+# calculator reference app uses 20 kg per parcel.
+DEFAULT_BOX_MAX_WEIGHT_KG = 20.0
+
+# "what fits" column headers -> capacity family. A product joins a family by name.
+CAPACITY_COLUMNS = {
+    "50ml": "50ml", "120ml": "120ml", "10ml": "10ml", "250ml": "250ml", "prokits": "prokits",
+    "glide250ml": "glide_250ml", "glidekit": "glide_kit",
+}
+
+
+# Packed size of each workbook family (cm, any order), from the reference products.
+CAPACITY_FAMILY_SIZES = {
+    (4.0, 4.0, 12.0): "50ml",
+    (5.0, 5.0, 16.0): "120ml",
+    (2.5, 2.5, 8.0): "10ml",
+    (6.0, 6.0, 20.0): "glide_250ml",
+    (6.0, 15.0, 20.0): "prokits",
+    (10.0, 15.0, 20.0): "glide_kit",
+}
+
+
+def capacity_family_for(name: str, dims: tuple[float, float, float] | None = None) -> str:
+    """Capacity family of a catalog product (variants share one pool).
+
+    By name first ("50 ml", "Glide 250ml", "Pro Kit", "Glide kit"); otherwise a product
+    whose packed size equals a family's reference size joins that family, so variants
+    named only by type ("Magigoo PA", "Magigoo HT") share the 50 ml pool.
+    """
+    normalized = re.sub(r"\s+", " ", name.lower()).strip()
+    if "glide" in normalized and "250" in normalized:
+        return "glide_250ml"
+    if "glide kit" in normalized:
+        return "glide_kit"
+    if re.search(r"pro\s*kit", normalized):
+        return "prokits"
+    for size in ("120", "50", "10"):
+        if re.search(rf"\b{size}\s*ml\b", normalized):
+            return f"{size}ml"
+    if dims and all(isinstance(side, (int, float)) for side in dims):
+        return CAPACITY_FAMILY_SIZES.get(tuple(sorted(round(float(side), 2) for side in dims)), "")
+    return ""
+
+
+def _capacity_value(value: Any) -> float | None:
+    """Numeric capacity; "67 / 75" keeps the lower value, text such as "8x50 (400)" is skipped."""
+    if isinstance(value, (int, float)):
+        return float(value) if value > 0 else None
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)\s*", str(value or ""))
+    if match:
+        return min(float(match.group(1)), float(match.group(2)))
+    return None
+
+
 def parse_reference_workbook(content: bytes) -> dict[str, list[dict[str, Any]]] | None:
     """Read the operational volume/weight calculator supplied by the user.
 
     The workbook is intentionally not a flat import template: product weights live in
-    columns A:B of one sheet and shipping boxes live in a matrix on another sheet.
+    columns A:B of one sheet and shipping boxes live in a matrix on another sheet, whose
+    columns D onwards say how many units of each product family a box holds.
     """
     workbook = load_workbook(io.BytesIO(content), data_only=True, read_only=True)
     required_sheets = {"boxes bottles volumes", "box types-what fits"}
@@ -743,17 +1190,29 @@ def parse_reference_workbook(content: bytes) -> dict[str, list[dict[str, Any]]] 
                 "width_cm": width,
                 "height_cm": height,
                 "weight_kg": float(weight),
+                "capacity_family": capacity_family_for(str(name), (length, width, height)),
             }
         )
 
     boxes_sheet = workbook["box types-what fits"]
+    header = next(boxes_sheet.iter_rows(min_row=2, max_row=2, values_only=True), ())
+    families = {
+        index: CAPACITY_COLUMNS[key]
+        for index, title in enumerate(header)
+        if index >= 3 and (key := re.sub(r"[^a-z0-9]", "", str(title or "").lower())) in CAPACITY_COLUMNS
+    }
     boxes: list[dict[str, Any]] = []
-    for row in boxes_sheet.iter_rows(min_row=3, max_row=15, min_col=1, max_col=3, values_only=True):
-        name, raw_dimensions, weight_grams = row
+    for row in boxes_sheet.iter_rows(min_row=3, max_row=15, values_only=True):
+        name, raw_dimensions, weight_grams = (list(row) + [None] * 3)[:3]
         dimensions = _parse_mm_dimensions(raw_dimensions)
         if not name or not dimensions or not isinstance(weight_grams, (int, float)):
             continue
         length, width, height = dimensions
+        capacities = {
+            family: capacity
+            for index, family in families.items()
+            if index < len(row) and (capacity := _capacity_value(row[index])) is not None
+        }
         boxes.append(
             {
                 "code": re.sub(r"[^A-Z0-9]+", "-", str(name).upper()).strip("-"),
@@ -762,7 +1221,8 @@ def parse_reference_workbook(content: bytes) -> dict[str, list[dict[str, Any]]] 
                 "width_cm": width,
                 "height_cm": height,
                 "empty_weight_kg": round(float(weight_grams) / 1000, 4),
-                "max_weight_kg": 25.0,
+                "max_weight_kg": DEFAULT_BOX_MAX_WEIGHT_KG,
+                "capacities": capacities,
             }
         )
     return {"products": products, "boxes": boxes}

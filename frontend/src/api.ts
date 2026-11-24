@@ -1,5 +1,5 @@
 import type { RecommendationPreview } from './workflow'
-import type { AnalysisReport, BoxType, Client, ClientImportResult, ClientInput, ClientRequirement, ClientRequirementInput, ClientRequirementsImportResult, DashboardData, DhlConfig, OrderDetailData, OrderSummary, Product, ShippingQuoteInputs, ShippingQuoteResponse } from './types'
+import type { AnalysisReport, BoxType, Client, ClientImportResult, ClientInput, ClientRequirement, ClientRequirementInput, ClientRequirementsImportResult, DashboardData, DhlConfig, OrderDetailData, OrderSummary, Product, ShippingQuoteInputs, ShippingQuoteResponse, TscaDraft, TscaState } from './types'
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number, public readonly details: unknown) { super(message); this.name = 'ApiError' }
@@ -63,8 +63,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
-  analyzeOrder: (id: number, objective?: string) =>
-    request(`/orders/${id}/analyze${objective ? `?objective=${encodeURIComponent(objective)}` : ''}`, { method: 'POST' }),
+  analyzeOrder: (id: number, objective?: string, allowanceCm?: number) => {
+    const query = new URLSearchParams()
+    if (objective) query.set('objective', objective)
+    if (allowanceCm !== undefined) query.set('allowance_cm', String(allowanceCm))
+    const suffix = query.toString() ? `?${query}` : ''
+    return request(`/orders/${id}/analyze${suffix}`, { method: 'POST' })
+  },
   addSuggestedItem: (orderId: number, sourceItemId: number, quantity: number, expectedPlanId?: number) =>
     request<OrderDetailData>(`/orders/${orderId}/suggested-items`, {
       method: 'POST',
@@ -106,6 +111,26 @@ export const api = {
   boxLabelsPdf: (id: number, orderNumber: string, box?: number) =>
     downloadPdf(`/api/orders/${id}/labels.pdf${box ? `?box=${box}` : ''}`,
       `labels-${safeName(orderNumber, id)}${box ? `-box${box}` : ''}.pdf`, 'The box labels could not be generated.'),
+  tsca: (id: number) => request<TscaState>(`/orders/${id}/tsca`),
+  saveTsca: (id: number, draft: TscaDraft, confirmed: boolean, rememberProductIds: number[] = []) =>
+    request<TscaState>(`/orders/${id}/tsca`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draft, confirmed, remember_product_ids: rememberProductIds }),
+    }),
+  tscaPreview: async (id: number, draft: TscaDraft, confirmed: boolean, signal?: AbortSignal) => {
+    const response = await fetch(`/api/orders/${id}/tsca/preview.pdf`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draft, confirmed }), signal,
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ detail: 'The preview could not be generated.' }))
+      throw new Error(typeof payload.detail === 'string' ? payload.detail : 'Some fields need attention before the preview can be shown.')
+    }
+    return response.blob()
+  },
+  tscaPdf: (id: number, orderNumber: string, final: boolean) =>
+    downloadPdf(`/api/orders/${id}/tsca.pdf?final=${final ? 1 : 0}`,
+      `TSCA_Certification_${safeName(orderNumber, id)}${final ? '' : '_DRAFT'}.pdf`, 'The TSCA certification could not be generated.'),
   sourcePdf: async (id: number) => {
     const response = await fetch(`/api/orders/${id}/source.pdf`)
     if (!response.ok) throw new Error(response.status === 404 ? 'The original PDF is unavailable. Only PDFs uploaded after source retention was enabled can be viewed.' : 'The source PDF could not be opened. Try again.')

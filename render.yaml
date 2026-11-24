@@ -1,5 +1,7 @@
 # A single free service serves both the React app and the FastAPI endpoints.
-# Free instances have ephemeral storage: demo data resets after restart/spin-down.
+# Set DATABASE_URL (PostgreSQL, e.g. Neon pooled URL with ?sslmode=require) in the
+# dashboard to persist data. Without it the app falls back to SQLite on the
+# instance's ephemeral disk, so demo data resets after restart/spin-down.
 services:
   - type: web
     name: packflow-demo
@@ -14,3 +16,5 @@ services:
         value: "true"
       - key: PACKFLOW_DB_PATH
         value: /app/data/packflow.db
+      - key: DATABASE_URL
+        sync: false

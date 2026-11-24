@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import hashlib
 import re
-import sqlite3
 import unicodedata
 from difflib import SequenceMatcher
 from io import BytesIO
@@ -21,21 +21,29 @@ from pydantic import BaseModel, Field
 
 from . import dhl_pricing
 from .database import (
-    connect, get_shipping_quote, init_db, latest_plan, now_iso, rows_to_dicts, save_shipping_quote,
+    Database,
+    DatabaseError,
+    IntegrityError,
+    database_engine,
+    apply_tsca_catalog, connect, get_shipping_quote, init_db, latest_plan, now_iso, rows_to_dicts,
+    save_shipping_quote,
 )
 from .destinations import detect_destination
 from .geo import with_country_code
 from .dhl_surcharges import REGION_LABELS, load_surcharges
 from .extraction import (
-    extract_email, extract_pdf, parse_catalog_excel, parse_clients_excel, parse_reference_workbook,
+    capacity_family_for, extract_email, extract_pdf, parse_catalog_excel, parse_clients_excel,
+    parse_reference_workbook,
 )
 from .packing import DEFAULT_OBJECTIVE as DEFAULT_PACKING_OBJECTIVE
 from .packing import OBJECTIVES as PACKING_OBJECTIVES
-from .packing import fill_existing_plan, pack_order
+from .packing import PackingSettings, fill_existing_plan, pack_order
 from .requirements_routes import requirements_note_for, router as requirements_router
 from .labels import render_box_labels_pdf
 from .reports import render_analysis_pdf
 from .shipping_docs import DEFAULT_EXPORTER, build_shipment, render_packing_list_pdf
+from . import tsca
+from .naming import normalize_product_name
 from .env import load_env
 from .slack_notify import notify_plan_ready
 
@@ -46,9 +54,14 @@ class ProductPayload(BaseModel):
     width_cm: float = Field(gt=0)
     height_cm: float = Field(gt=0)
     weight_kg: float = Field(gt=0)
-    price_eur: float = Field(default=0, ge=0)
     rotation_allowed: bool = True
     fragile: bool = False
+    # Workbook "what fits" capacity family; omitted, it is kept (or derived from the name).
+    capacity_family: str | None = None
+    # TSCA certification fields; omitted, they are kept.
+    ean: str | None = Field(default=None, max_length=32)
+    tsca_name: str | None = Field(default=None, max_length=500)
+    tsca_description: str | None = Field(default=None, max_length=4000)
 
 
 class BoxPayload(BaseModel):
@@ -59,6 +72,11 @@ class BoxPayload(BaseModel):
     height_cm: float = Field(gt=0)
     empty_weight_kg: float = Field(ge=0)
     max_weight_kg: float = Field(gt=0)
+    # Units of each capacity family the box holds; omitted, the stored values are kept.
+    capacities: dict[str, float] | None = None
+    # Theoretical number of 50 ml / 250 ml products that fit; reference only, blank = unknown.
+    reference_50ml: int | None = Field(default=None, ge=0)
+    reference_250ml: int | None = Field(default=None, ge=0)
 
 
 class OrderItemPayload(BaseModel):
@@ -126,10 +144,7 @@ def _line_amount(item: OrderItemPayload) -> float:
     )
 
 
-def _normalize_product_name(value: str) -> str:
-    ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
-    normalized = re.sub(r"[^a-z0-9]+", " ", ascii_value.lower()).strip()
-    return re.sub(r"(\d)\s+ml\b", r"\1ml", normalized)
+_normalize_product_name = normalize_product_name
 
 
 def _internal_product_code(name: str) -> str:
@@ -172,8 +187,8 @@ def _product_variant(normalized: str) -> str | None:
 
 
 def _match_by_family_and_variant(
-    products: list[sqlite3.Row], target: str
-) -> sqlite3.Row | None:
+    products: list[Any], target: str
+) -> Any | None:
     """Match PO wording such as 'MAGIGOO Glide 250ml - Supergrip' to one catalog product.
 
     Works for a catalog with one product per variant ('Magigoo Supergrip Glide 250ml') and
@@ -199,8 +214,8 @@ def _match_by_family_and_variant(
 
 
 def _find_product_by_description(
-    db: sqlite3.Connection, description: str
-) -> sqlite3.Row | None:
+    db: Database, description: str
+) -> Any | None:
     target = _normalize_product_name(description)
     if not target:
         return None
@@ -261,7 +276,7 @@ def _find_product_by_description(
     return best_product if best_score >= 0.88 else None
 
 
-def _relink_order_items(db: sqlite3.Connection, order_id: int) -> None:
+def _relink_order_items(db: Database, order_id: int) -> None:
     for item in db.execute(
         "SELECT id, description FROM order_items WHERE order_id = ?", (order_id,)
     ).fetchall():
@@ -273,7 +288,7 @@ def _relink_order_items(db: sqlite3.Connection, order_id: int) -> None:
 
 
 def _insert_order_item(
-    db: sqlite3.Connection, order_id: int, item: OrderItemPayload, position: int
+    db: Database, order_id: int, item: OrderItemPayload, position: int
 ) -> None:
     product = _find_product_by_description(db, item.description)
     db.execute(
@@ -301,7 +316,7 @@ def _insert_order_item(
     )
 
 
-def _packing_rows(db: sqlite3.Connection, order_id: int) -> list[dict[str, Any]]:
+def _packing_rows(db: Database, order_id: int) -> list[dict[str, Any]]:
     return rows_to_dicts(
         db.execute(
             """
@@ -309,7 +324,7 @@ def _packing_rows(db: sqlite3.Connection, order_id: int) -> list[dict[str, Any]]
                 oi.id AS order_item_id, oi.quantity, oi.unit_price, oi.description,
                 oi.is_suggested, p.id AS product_id, CAST(p.id AS TEXT) AS sku, p.name,
                 p.length_cm, p.width_cm, p.height_cm, p.weight_kg,
-                p.rotation_allowed, p.fragile
+                p.rotation_allowed, p.fragile, p.capacity_family
             FROM order_items oi
             JOIN products p ON p.id = oi.product_id
             WHERE oi.order_id = ? AND p.active = 1
@@ -320,7 +335,7 @@ def _packing_rows(db: sqlite3.Connection, order_id: int) -> list[dict[str, Any]]
 
 
 def _fill_recommendations(
-    db: sqlite3.Connection,
+    db: Database,
     order_id: int,
     items: list[dict[str, Any]],
     boxes: list[dict[str, Any]],
@@ -359,7 +374,7 @@ def _fill_recommendations(
     return recommendations[:4]
 
 
-def _refresh_order_totals(db: sqlite3.Connection, order_id: int) -> None:
+def _refresh_order_totals(db: Database, order_id: int) -> None:
     row = db.execute(
         "SELECT COALESCE(SUM(amount), 0) AS subtotal FROM order_items WHERE order_id = ?",
         (order_id,),
@@ -374,7 +389,7 @@ def _refresh_order_totals(db: sqlite3.Connection, order_id: int) -> None:
     )
 
 
-def _packing_zone(db: sqlite3.Connection, order_id: int) -> int | None:
+def _packing_zone(db: Database, order_id: int) -> int | None:
     """DHL zone used to rank plans by shipping cost: the saved quote's destination, else
     the destination detected from the order and client data."""
     quote = get_shipping_quote(db, order_id)
@@ -388,13 +403,57 @@ def _packing_zone(db: sqlite3.Connection, order_id: int) -> int | None:
         return None
 
 
-def _current_objective(db: sqlite3.Connection, order_id: int) -> str:
+def _packing_settings(db: Database) -> PackingSettings:
+    """Packing rules from ``app_settings`` (packing_allowance_cm, packing_gap_cm,
+    packing_use_capacities, packing_allow_on_side, packing_max_parcel_kg); the defaults
+    follow the DHL calculator reference app."""
+    stored = {row["key"]: row["value"] for row in db.execute(
+        "SELECT key, value FROM app_settings WHERE key LIKE 'packing_%'")}
+    defaults = PackingSettings()
+
+    def number(key: str, default: float) -> float:
+        try:
+            return max(0.0, float(stored.get(key, default)))
+        except (TypeError, ValueError):
+            return default
+
+    def flag(key: str) -> bool:
+        return str(stored.get(key, "1")).strip().lower() not in {"0", "false", "no", "off"}
+
+    return PackingSettings(
+        allowance_cm=number("packing_allowance_cm", defaults.allowance_cm),
+        gap_cm=number("packing_gap_cm", defaults.gap_cm),
+        use_capacities=flag("packing_use_capacities"),
+        allow_on_side=flag("packing_allow_on_side"),
+        # 0 turns the global limit off, leaving only each carton's own maximum.
+        max_parcel_kg=number("packing_max_parcel_kg", defaults.max_parcel_kg) or None,
+    )
+
+
+MAX_ALLOWANCE_CM = 5.0
+
+
+def _current_allowance(db: Database, order_id: int) -> float | None:
+    """Wall clearance the order's latest plan was calculated with, if any."""
+    plan = latest_plan(db, order_id)
+    value = (((plan or {}).get("result") or {}).get("settings") or {}).get("allowance_cm")
+    return float(value) if isinstance(value, (int, float)) and 0 <= value <= MAX_ALLOWANCE_CM else None
+
+
+def _current_objective(db: Database, order_id: int) -> str:
     plan = latest_plan(db, order_id)
     objective = ((plan or {}).get("result") or {}).get("objective")
     return objective if objective in PACKING_OBJECTIVES else DEFAULT_PACKING_OBJECTIVE
 
 
-def _run_plan(db: sqlite3.Connection, order_id: int, objective: str | None = None) -> dict[str, Any]:
+def _run_plan(db: Database, order_id: int, objective: str | None = None,
+              repack_additions: bool = True, allowance_cm: float | None = None) -> dict[str, Any]:
+    """``allowance_cm``: wall clearance per side; omitted, the order keeps the one of its
+    latest plan, and a first plan uses the packing_allowance_cm setting (0.5 cm by default)."""
+    if allowance_cm is None:
+        allowance_cm = _current_allowance(db, order_id)
+    elif not 0 <= allowance_cm <= MAX_ALLOWANCE_CM:
+        raise HTTPException(422, f"The wall clearance must be between 0 and {MAX_ALLOWANCE_CM:g} cm.")
     objective = objective or _current_objective(db, order_id)
     if objective not in PACKING_OBJECTIVES:
         raise HTTPException(422, f"Unknown packing objective {objective!r}.")
@@ -426,17 +485,31 @@ def _run_plan(db: sqlite3.Connection, order_id: int, objective: str | None = Non
         raise HTTPException(422, "There are no active box types.")
     primary_items = [item for item in items if not item["is_suggested"]]
     additions = [item for item in items if item["is_suggested"]]
-    result = pack_order(primary_items, boxes, objective, _packing_zone(db, order_id))
+    zone, settings = _packing_zone(db, order_id), _packing_settings(db)
+    if allowance_cm is not None:
+        settings = dataclasses.replace(settings, allowance_cm=float(allowance_cm))
+    result = pack_order(primary_items, boxes, objective, zone, settings)
     if additions:
         if result["status"] != "complete":
             raise HTTPException(422, "The original order does not fit. Review the additional products.")
         base = result
         result = fill_existing_plan(base, items, additions)
         # Additions go into the existing boxes, so the objective comparison still applies.
-        for key in ("objective", "objective_label", "dhl_zone", "dhl_zone_assumed", "options"):
+        for key in ("objective", "objective_label", "dhl_zone", "dhl_zone_assumed", "options", "settings", "search"):
             result[key] = base[key]
         if result["status"] != "complete":
-            raise HTTPException(422, "The additional products do not fit in the original order’s boxes.")
+            if not repack_additions:
+                raise HTTPException(422, "The additional products do not fit in the original order’s boxes.")
+            # Added products accepted under earlier packing rules may no longer fit the
+            # original cartons (wall allowance, full support, workbook capacities).
+            result = pack_order(items, boxes, objective, zone, settings)
+            if result["status"] != "complete":
+                raise HTTPException(422, "The additional products do not fit in the original order’s boxes.")
+            result["suggestions"].insert(0, {
+                "type": "info",
+                "title": "Order packed again with the added products",
+                "detail": "The added products no longer fit in the original boxes with the current packing rules, so the whole order was packed again.",
+            })
     result["product_recommendations"] = _fill_recommendations(
         db, order_id, items, boxes, result
     )
@@ -501,10 +574,10 @@ app.include_router(requirements_router)
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "database": "sqlite"}
+    return {"status": "ok", "database": database_engine()}
 
 
-def _order_summary_rows(db: sqlite3.Connection) -> list[dict[str, Any]]:
+def _order_summary_rows(db: Database) -> list[dict[str, Any]]:
     return rows_to_dicts(
         db.execute(
             """
@@ -521,8 +594,8 @@ def _order_summary_rows(db: sqlite3.Connection) -> list[dict[str, Any]]:
                 SELECT id FROM packing_plans
                 WHERE order_id = o.id ORDER BY id DESC LIMIT 1
             )
-            GROUP BY o.id
-            ORDER BY o.order_date DESC, o.id DESC
+            GROUP BY o.id, pp.id
+            ORDER BY o.order_date DESC NULLS LAST, o.id DESC
             """
         ).fetchall()
     )
@@ -566,7 +639,7 @@ def delete_all_orders() -> dict[str, int]:
         # Foreign key cascades remove items, packing plans and saved PDFs atomically.
         count = db.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
         db.execute("DELETE FROM orders")
-        db.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('demo_orders_seeded', '1')")
+        db.execute("INSERT INTO app_settings (key, value) VALUES ('demo_orders_seeded', '1') ON CONFLICT (key) DO UPDATE SET value = excluded.value")
     return {"deleted_orders": count}
 
 
@@ -579,7 +652,7 @@ def delete_order(order_id: int) -> dict[str, Any]:
         # Foreign key cascades remove its items, packing plans and saved PDFs.
         db.execute("DELETE FROM orders WHERE id = ?", (order_id,))
         # Deleting the last order by hand must not bring the demo orders back on restart.
-        db.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('demo_orders_seeded', '1')")
+        db.execute("INSERT INTO app_settings (key, value) VALUES ('demo_orders_seeded', '1') ON CONFLICT (key) DO UPDATE SET value = excluded.value")
     return {"deleted_order_id": order_id, "order_number": row["order_number"]}
 
 
@@ -670,7 +743,7 @@ async def upload_order(file: UploadFile = File(...)) -> dict[str, Any]:
                 suffix += 1
                 number = f"{base}-{suffix}"
             timestamp = now_iso()
-            cursor = db.execute(
+            order_id = db.insert_returning_id(
                 """
                 INSERT INTO orders
                     (order_number, client, vendor, order_date, requested_date, currency,
@@ -679,11 +752,15 @@ async def upload_order(file: UploadFile = File(...)) -> dict[str, Any]:
                      status, confidence, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'pdf', ?, ?, ?, ?, ?, ?, ?,
                         'needs_review', ?, ?, ?)
+                RETURNING id
                 """,
                 (number, *values[:-1], timestamp, values[-1]),
             )
-            order_id = cursor.lastrowid
-        db.execute("INSERT OR REPLACE INTO source_documents (order_id, filename, content) VALUES (?, ?, ?)", (order_id, file.filename, content))
+        db.execute(
+            """INSERT INTO source_documents (order_id, filename, content) VALUES (?, ?, ?)
+               ON CONFLICT (order_id) DO UPDATE SET filename = excluded.filename, content = excluded.content""",
+            (order_id, file.filename, content),
+        )
         for item in extracted["items"]:
             payload = OrderItemPayload(**item)
             _insert_order_item(db, order_id, payload, payload.line_number or 1)
@@ -718,7 +795,7 @@ def create_manual_order(payload: OrderReviewPayload) -> dict[str, Any]:
     return get_order(order_id)
 
 
-def _create_order(db: sqlite3.Connection, payload: OrderReviewPayload, *, source_type: str = "manual",
+def _create_order(db: Database, payload: OrderReviewPayload, *, source_type: str = "manual",
                   source_filename: str | None = None, confidence: float = 1) -> int:
     if db.execute(
         "SELECT 1 FROM orders WHERE order_number = ?", (payload.order_number.strip(),)
@@ -729,7 +806,7 @@ def _create_order(db: sqlite3.Connection, payload: OrderReviewPayload, *, source
     )
     total = payload.total_amount or round(subtotal + payload.tax_amount, 2)
     timestamp = now_iso()
-    cursor = db.execute(
+    order_id = db.insert_returning_id(
         """
         INSERT INTO orders
             (order_number, client, vendor, order_date, requested_date, currency,
@@ -738,6 +815,7 @@ def _create_order(db: sqlite3.Connection, payload: OrderReviewPayload, *, source
              status, confidence, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 'needs_review', ?, ?, ?)
+        RETURNING id
         """,
         (
             payload.order_number.strip(),
@@ -760,7 +838,6 @@ def _create_order(db: sqlite3.Connection, payload: OrderReviewPayload, *, source
             timestamp,
         ),
     )
-    order_id = cursor.lastrowid
     for position, item in enumerate(payload.items, start=1):
         _insert_order_item(db, order_id, item, position)
     return order_id
@@ -806,7 +883,7 @@ def review_order(order_id: int, payload: OrderReviewPayload) -> dict[str, Any]:
                     order_id,
                 ),
             )
-        except sqlite3.IntegrityError as exc:
+        except IntegrityError as exc:
             raise HTTPException(409, "An order with this number already exists.") from exc
         db.execute("DELETE FROM packing_plans WHERE order_id = ?", (order_id,))
         db.execute("DELETE FROM order_items WHERE order_id = ?", (order_id,))
@@ -816,13 +893,15 @@ def review_order(order_id: int, payload: OrderReviewPayload) -> dict[str, Any]:
 
 
 @app.post("/api/orders/{order_id}/analyze")
-def analyze_order(order_id: int, objective: str | None = None) -> dict[str, Any]:
+def analyze_order(order_id: int, objective: str | None = None,
+                  allowance_cm: float | None = None) -> dict[str, Any]:
     """Calculate the packing plan. ``objective``: fewest_boxes, lowest_dhl_cost or
-    smallest_volume; omitted, the order keeps the objective of its latest plan."""
+    smallest_volume; ``allowance_cm``: wall clearance per side (0-5 cm). Omitted, the order
+    keeps the values of its latest plan."""
     with connect() as db:
         if not db.execute("SELECT 1 FROM orders WHERE id = ?", (order_id,)).fetchone():
             raise HTTPException(404, "Order not found.")
-        return _run_plan(db, order_id, objective)
+        return _run_plan(db, order_id, objective, allowance_cm=allowance_cm)
 
 
 @app.get("/api/orders/{order_id}/source.pdf")
@@ -836,14 +915,14 @@ def view_source_pdf(order_id: int) -> Response:
         "Content-Disposition": f'inline; filename="{filename}"', "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
 
 
-def _check_expected_plan(db: sqlite3.Connection, order_id: int, expected: int | None) -> dict[str, Any] | None:
+def _check_expected_plan(db: Database, order_id: int, expected: int | None) -> dict[str, Any] | None:
     plan = latest_plan(db, order_id)
     if expected is not None and (not plan or plan["id"] != expected):
         raise HTTPException(409, "The packing plan changed. Refresh and preview the addition again.")
     return plan
 
 
-def _append_suggested_item(db: sqlite3.Connection, order_id: int, source: sqlite3.Row, quantity: int) -> None:
+def _append_suggested_item(db: Database, order_id: int, source: Any, quantity: int) -> None:
     amount = round(quantity * source["unit_price"], 2)
     existing = db.execute(
         """
@@ -940,7 +1019,8 @@ def add_suggested_item(order_id: int, payload: SuggestedItemPayload) -> dict[str
         if not source:
             raise HTTPException(404, "This recommendation is no longer available.")
         _append_suggested_item(db, order_id, source, payload.quantity)
-        _run_plan(db, order_id)
+        # A new addition must fit the existing boxes; otherwise nothing is saved.
+        _run_plan(db, order_id, repack_additions=False)
     return get_order(order_id)
 
 
@@ -978,7 +1058,8 @@ def _save_analysis_report(order_id: int) -> dict[str, Any]:
         row = db.execute("SELECT id, filename, created_at FROM analysis_reports WHERE plan_id = ?", (plan_id,)).fetchone()
         if row is None:
             content = render_analysis_pdf(order)
-            db.execute("INSERT OR IGNORE INTO analysis_reports (order_id, plan_id, filename, pdf_content, created_at) VALUES (?, ?, ?, ?, ?)",
+            db.execute("INSERT INTO analysis_reports (order_id, plan_id, filename, pdf_content, created_at) VALUES (?, ?, ?, ?, ?) "
+                       "ON CONFLICT (plan_id) DO NOTHING",
                        (order_id, plan_id, filename, content, now_iso()))
             row = db.execute("SELECT id, filename, created_at FROM analysis_reports WHERE plan_id = ?", (plan_id,)).fetchone()
     return {**dict(row), "order_id": order_id, "plan_id": plan_id,
@@ -1027,7 +1108,7 @@ class ExporterPayload(BaseModel):
     signatory_title: str = ""
 
 
-def _load_exporter(db: sqlite3.Connection) -> dict[str, str]:
+def _load_exporter(db: Database) -> dict[str, str]:
     row = db.execute("SELECT value FROM app_settings WHERE key = 'exporter_profile'").fetchone()
     stored = json.loads(row["value"]) if row else {}
     return {**DEFAULT_EXPORTER, **{k: v for k, v in stored.items() if k in DEFAULT_EXPORTER}}
@@ -1042,7 +1123,8 @@ def get_exporter() -> dict[str, str]:
 @app.put("/api/settings/exporter")
 def update_exporter(payload: ExporterPayload) -> dict[str, str]:
     with connect() as db:
-        db.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('exporter_profile', ?)",
+        db.execute("INSERT INTO app_settings (key, value) VALUES ('exporter_profile', ?) "
+                   "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                    (json.dumps(payload.model_dump()),))
         return _load_exporter(db)
 
@@ -1101,6 +1183,160 @@ def export_box_labels(order_id: int, box: int | None = Query(default=None, ge=1)
         raise HTTPException(404, str(exc)) from exc
     suffix = f"-box{box}" if box else ""
     filename = f"labels-{_safe_number(shipment['order_number'], order_id)}{suffix}.pdf"
+    return Response(content=content, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+# --------------------------------------------------------------------------- TSCA certification
+
+
+class TscaItemPayload(BaseModel):
+    product_id: int | None = None
+    number: str = Field(default="", max_length=tsca.LIMITS["number"])
+    name: str = Field(default="", max_length=tsca.LIMITS["name"])
+    description: str = Field(default="", max_length=tsca.LIMITS["description"])
+
+
+class TscaDraftPayload(BaseModel):
+    date: str = Field(default="", max_length=tsca.LIMITS["date"])
+    reference: str = Field(default="", max_length=tsca.LIMITS["reference"])
+    certification: str = ""
+    items: list[TscaItemPayload] = Field(default_factory=list, max_length=tsca.LIMITS["items"])
+
+
+class TscaSavePayload(BaseModel):
+    draft: TscaDraftPayload
+    # The user's statement that they checked everything against their compliance records.
+    confirmed: bool = False
+    # Catalog products whose number (EAN), name and description should be remembered.
+    remember_product_ids: list[int] = Field(default_factory=list)
+
+
+def _order_destination(db: Database, order_id: int) -> dict[str, Any] | None:
+    """Shipment destination: the saved DHL quote's destination, else the one detected from the order."""
+    quote = get_shipping_quote(db, order_id)
+    code = ((quote or {}).get("inputs") or {}).get("destination")
+    if code:
+        try:
+            return dhl_pricing.zone_for(str(code))
+        except (dhl_pricing.PricingError, KeyError, TypeError, ValueError):
+            pass
+    return _detect_order_destination(db, order_id)
+
+
+def _tsca_state(db: Database, order_id: int) -> dict[str, Any]:
+    order = db.execute("SELECT id, order_number FROM orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        raise HTTPException(404, "Order not found.")
+    destination = _order_destination(db, order_id)
+    saved = db.execute("SELECT draft_json, confirmed_at, updated_at FROM tsca_declarations WHERE order_id = ?",
+                       (order_id,)).fetchone()
+    if saved:
+        draft = tsca.normalize_draft(json.loads(saved["draft_json"]))
+        ids = [item["product_id"] for item in draft["items"] if item["product_id"] is not None]
+        if ids:
+            rows = db.execute(
+                f"SELECT id, name, ean, tsca_name, tsca_description FROM products WHERE id IN ({', '.join('?' * len(ids))})",
+                tuple(ids)).fetchall()
+            tsca.fill_from_catalog(draft, {row["id"]: dict(row) for row in rows})
+    else:
+        lines = rows_to_dicts(db.execute(
+            """SELECT oi.product_id, oi.sku_raw, oi.description, oi.quantity, p.sku,
+                      p.name AS product_name, p.ean, p.tsca_name, p.tsca_description
+               FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id
+               WHERE oi.order_id = ? ORDER BY oi.id""", (order_id,)).fetchall())
+        draft = tsca.default_draft(dict(order), lines)
+    return {
+        "eligible": bool(destination and destination.get("code") in tsca.TSCA_DESTINATIONS),
+        "destination": {"code": destination["code"], "name": destination["name"]} if destination else None,
+        "saved": bool(saved),
+        "confirmed": bool(saved and saved["confirmed_at"]),
+        "updated_at": saved["updated_at"] if saved else None,
+        "draft": draft,
+        "issues": tsca.draft_issues(draft),
+    }
+
+
+def _require_tsca_eligible(state: dict[str, Any]) -> None:
+    if not state["eligible"]:
+        where = state["destination"]["name"] if state["destination"] else "an unknown destination"
+        raise HTTPException(422, f"The TSCA certification is only for shipments to the United States. "
+                                 f"This order ships to {where}.")
+
+
+@app.get("/api/orders/{order_id}/tsca")
+def get_tsca(order_id: int) -> dict[str, Any]:
+    with connect() as db:
+        return _tsca_state(db, order_id)
+
+
+@app.put("/api/orders/{order_id}/tsca")
+def save_tsca(order_id: int, payload: TscaSavePayload) -> dict[str, Any]:
+    try:
+        draft = tsca.normalize_draft(payload.draft.model_dump())
+    except tsca.TscaError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    issues = tsca.draft_issues(draft)
+    if payload.confirmed and issues:
+        raise HTTPException(422, " ".join(issues))
+    with connect() as db:
+        _require_tsca_eligible(_tsca_state(db, order_id))
+        stamp = now_iso()
+        db.execute(
+            """INSERT INTO tsca_declarations (order_id, draft_json, confirmed_at, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT (order_id) DO UPDATE SET draft_json = excluded.draft_json,
+                   confirmed_at = excluded.confirmed_at, updated_at = excluded.updated_at""",
+            (order_id, json.dumps(draft), stamp if payload.confirmed else None, stamp, stamp),
+        )
+        remember = set(payload.remember_product_ids)
+        for item in draft["items"]:
+            if item["product_id"] in remember:
+                db.execute(
+                    """UPDATE products SET tsca_name = ?, tsca_description = ?,
+                           ean = CASE WHEN ? <> '' THEN ? ELSE ean END WHERE id = ?""",
+                    (item["name"], item["description"], *(2 * [item["number"] if tsca.looks_like_ean(item["number"]) else ""]),
+                     item["product_id"]),
+                )
+        return _tsca_state(db, order_id)
+
+
+class TscaPreviewPayload(BaseModel):
+    draft: TscaDraftPayload
+    confirmed: bool = False
+
+
+@app.post("/api/orders/{order_id}/tsca/preview.pdf")
+def preview_tsca(order_id: int, payload: TscaPreviewPayload) -> Response:
+    """Render the unsaved draft for the in-dialog viewer. Nothing is stored. It looks final only
+    when the draft is complete and the user ticked the review; otherwise it is marked DRAFT."""
+    with connect() as db:
+        _require_tsca_eligible(_tsca_state(db, order_id))
+    try:
+        draft = tsca.normalize_draft(payload.draft.model_dump())
+        content = tsca.render_tsca_pdf(draft, final=payload.confirmed and not tsca.draft_issues(draft))
+    except tsca.TscaError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return Response(content=content, media_type="application/pdf",
+                    headers={"Content-Disposition": 'inline; filename="TSCA_Certification_preview.pdf"',
+                             "Cache-Control": "no-store"})
+
+
+@app.get("/api/orders/{order_id}/tsca.pdf")
+def export_tsca(order_id: int, final: bool = Query(default=False)) -> Response:
+    with connect() as db:
+        state = _tsca_state(db, order_id)
+        number = db.execute("SELECT order_number FROM orders WHERE id = ?", (order_id,)).fetchone()["order_number"]
+    _require_tsca_eligible(state)
+    if final and state["issues"]:
+        raise HTTPException(422, " ".join(state["issues"]))
+    if final and not state["confirmed"]:
+        raise HTTPException(422, "Save the declaration with the final review confirmed before downloading the final PDF.")
+    try:
+        content = tsca.render_tsca_pdf(state["draft"], final=final)
+    except tsca.TscaError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    filename = f"TSCA_Certification_{_safe_number(number, order_id)}{'' if final else '_DRAFT'}.pdf"
     return Response(content=content, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
@@ -1208,7 +1444,7 @@ def _pdf_text(content: bytes) -> str:
         return ""
 
 
-def _detect_order_destination(db: sqlite3.Connection, order_id: int) -> dict[str, Any] | None:
+def _detect_order_destination(db: Database, order_id: int) -> dict[str, Any] | None:
     """Destination country from the PO: delivery address first, then the source document, then the client."""
     order = db.execute(
         "SELECT client, delivery_address, billing_address, notes FROM orders WHERE id = ?", (order_id,)
@@ -1304,44 +1540,54 @@ def create_product(payload: ProductPayload) -> dict[str, Any]:
         if existing and _normalize_product_name(existing["name"]) == _normalize_product_name(payload.name):
             raise HTTPException(409, "A product with this name already exists.")
         try:
-            cursor = db.execute(
+            product_id = db.insert_returning_id(
                 """
                 INSERT INTO products
-                    (sku, name, length_cm, width_cm, height_cm, weight_kg, price_eur,
-                     rotation_allowed, fragile, active, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                    (sku, name, length_cm, width_cm, height_cm, weight_kg,
+                     rotation_allowed, fragile, capacity_family, ean, tsca_name, tsca_description,
+                     active, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                RETURNING id
                 """,
                 (
                     _internal_product_code(payload.name), payload.name, payload.length_cm,
-                    payload.width_cm, payload.height_cm, payload.weight_kg, payload.price_eur,
-                    int(payload.rotation_allowed), int(payload.fragile), now_iso(),
+                    payload.width_cm, payload.height_cm, payload.weight_kg,
+                    int(payload.rotation_allowed), int(payload.fragile),
+                    payload.capacity_family if payload.capacity_family is not None else capacity_family_for(
+                        payload.name, (payload.length_cm, payload.width_cm, payload.height_cm)),
+                    (payload.ean or "").strip(), (payload.tsca_name or "").strip(),
+                    (payload.tsca_description or "").strip(), now_iso(),
                 ),
             )
-        except sqlite3.IntegrityError as exc:
+        except IntegrityError as exc:
             raise HTTPException(409, "A product with this name already exists.") from exc
-        return dict(db.execute("SELECT * FROM products WHERE id = ?", (cursor.lastrowid,)).fetchone())
+        apply_tsca_catalog(db)  # A known price-list product gets its EAN; typed values are kept.
+        return dict(db.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone())
 
 
 @app.post("/api/catalog/boxes", status_code=201)
 def create_box(payload: BoxPayload) -> dict[str, Any]:
     with connect() as db:
         try:
-            cursor = db.execute(
+            box_id = db.insert_returning_id(
                 """
                 INSERT INTO box_types
                     (code, name, length_cm, width_cm, height_cm,
-                     empty_weight_kg, max_weight_kg, active, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                     empty_weight_kg, max_weight_kg, capacities, reference_50ml, reference_250ml,
+                     active, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                RETURNING id
                 """,
                 (
                     payload.code.upper(), payload.name, payload.length_cm,
                     payload.width_cm, payload.height_cm, payload.empty_weight_kg,
-                    payload.max_weight_kg, now_iso(),
+                    payload.max_weight_kg, json.dumps(payload.capacities or {}),
+                    payload.reference_50ml, payload.reference_250ml, now_iso(),
                 ),
             )
-        except sqlite3.IntegrityError as exc:
+        except IntegrityError as exc:
             raise HTTPException(409, "This box code already exists.") from exc
-        return dict(db.execute("SELECT * FROM box_types WHERE id = ?", (cursor.lastrowid,)).fetchone())
+        return dict(db.execute("SELECT * FROM box_types WHERE id = ?", (box_id,)).fetchone())
 
 
 @app.put("/api/catalog/products/{product_id}")
@@ -1360,13 +1606,19 @@ def update_product(product_id: int, payload: ProductPayload) -> dict[str, Any]:
         db.execute(
             """
             UPDATE products SET name = ?, length_cm = ?, width_cm = ?, height_cm = ?,
-                weight_kg = ?, price_eur = ?, rotation_allowed = ?, fragile = ?
+                weight_kg = ?, rotation_allowed = ?, fragile = ?,
+                capacity_family = COALESCE(?, capacity_family),
+                ean = COALESCE(?, ean), tsca_name = COALESCE(?, tsca_name),
+                tsca_description = COALESCE(?, tsca_description)
             WHERE id = ?
             """,
             (
                 name, payload.length_cm, payload.width_cm, payload.height_cm,
-                payload.weight_kg, payload.price_eur, int(payload.rotation_allowed),
-                int(payload.fragile), product_id,
+                payload.weight_kg, int(payload.rotation_allowed),
+                int(payload.fragile), payload.capacity_family,
+                *(value.strip() if value is not None else None
+                  for value in (payload.ean, payload.tsca_name, payload.tsca_description)),
+                product_id,
             ),
         )
         return dict(db.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone())
@@ -1384,15 +1636,19 @@ def update_box(box_id: int, payload: BoxPayload) -> dict[str, Any]:
             db.execute(
                 """
                 UPDATE box_types SET code = ?, name = ?, length_cm = ?, width_cm = ?,
-                    height_cm = ?, empty_weight_kg = ?, max_weight_kg = ?
+                    height_cm = ?, empty_weight_kg = ?, max_weight_kg = ?,
+                    capacities = COALESCE(?, capacities),
+                    reference_50ml = ?, reference_250ml = ?
                 WHERE id = ?
                 """,
                 (
                     code, name, payload.length_cm, payload.width_cm, payload.height_cm,
-                    payload.empty_weight_kg, payload.max_weight_kg, box_id,
+                    payload.empty_weight_kg, payload.max_weight_kg,
+                    json.dumps(payload.capacities) if payload.capacities is not None else None,
+                    payload.reference_50ml, payload.reference_250ml, box_id,
                 ),
             )
-        except sqlite3.IntegrityError as exc:
+        except IntegrityError as exc:
             raise HTTPException(409, "This box code already exists.") from exc
         return dict(db.execute("SELECT * FROM box_types WHERE id = ?", (box_id,)).fetchone())
 
@@ -1420,7 +1676,9 @@ def delete_box(box_id: int) -> dict[str, Any]:
     return {"deleted_box_id": box_id, "code": row["code"]}
 
 
-def _upsert_product_record(db: sqlite3.Connection, record: dict[str, Any]) -> None:
+def _upsert_product_record(db: Database, record: dict[str, Any]) -> None:
+    family = record.get("capacity_family") or capacity_family_for(
+        str(record["name"]), (record["length_cm"], record["width_cm"], record["height_cm"]))
     product = _find_product_by_description(db, str(record["name"]))
     is_same_name = bool(
         product
@@ -1431,11 +1689,12 @@ def _upsert_product_record(db: sqlite3.Connection, record: dict[str, Any]) -> No
         db.execute(
             """
             UPDATE products SET name=?, length_cm=?, width_cm=?, height_cm=?,
-                weight_kg=?, active=1 WHERE id=?
+                weight_kg=?, capacity_family=CASE WHEN ? = '' THEN capacity_family ELSE ? END,
+                active=1 WHERE id=?
             """,
             (
                 record["name"], record["length_cm"], record["width_cm"],
-                record["height_cm"], record["weight_kg"], product["id"],
+                record["height_cm"], record["weight_kg"], family, family, product["id"],
             ),
         )
         return
@@ -1443,34 +1702,36 @@ def _upsert_product_record(db: sqlite3.Connection, record: dict[str, Any]) -> No
         """
         INSERT INTO products
             (sku, name, length_cm, width_cm, height_cm, weight_kg,
-             rotation_allowed, fragile, active, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, ?)
+             rotation_allowed, fragile, capacity_family, active, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, 1, ?)
         """,
         (
             _internal_product_code(str(record["name"])), record["name"],
             record["length_cm"], record["width_cm"], record["height_cm"],
-            record["weight_kg"], now_iso(),
+            record["weight_kg"], family, now_iso(),
         ),
     )
 
 
-def _upsert_box_record(db: sqlite3.Connection, record: dict[str, Any]) -> None:
+def _upsert_box_record(db: Database, record: dict[str, Any]) -> None:
     db.execute(
         """
         INSERT INTO box_types
             (code, name, length_cm, width_cm, height_cm,
-             empty_weight_kg, max_weight_kg, active, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+             empty_weight_kg, max_weight_kg, capacities, active, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
         ON CONFLICT(code) DO UPDATE SET
             name=excluded.name, length_cm=excluded.length_cm,
             width_cm=excluded.width_cm, height_cm=excluded.height_cm,
             empty_weight_kg=excluded.empty_weight_kg,
-            max_weight_kg=excluded.max_weight_kg, active=1
+            max_weight_kg=excluded.max_weight_kg,
+            capacities=CASE WHEN excluded.capacities = '{}' THEN box_types.capacities ELSE excluded.capacities END,
+            active=1
         """,
         (
             str(record["code"]).upper(), record["name"], record["length_cm"],
             record["width_cm"], record["height_cm"], record["empty_weight_kg"],
-            record["max_weight_kg"], now_iso(),
+            record["max_weight_kg"], json.dumps(record.get("capacities") or {}), now_iso(),
         ),
     )
 
@@ -1494,20 +1755,23 @@ async def import_catalog(catalog_type: str, file: UploadFile = File(...)) -> dic
         if reference:
             for record in reference["products"]:
                 try:
-                    _upsert_product_record(db, record)
+                    with db.savepoint():
+                        _upsert_product_record(db, record)
                     imported += 1
                     imported_products += 1
-                except sqlite3.DatabaseError as exc:
+                except DatabaseError as exc:
                     errors.append(f"Could not import product {record.get('name')}: {exc}")
             for record in reference["boxes"]:
                 try:
-                    _upsert_box_record(db, record)
+                    with db.savepoint():
+                        _upsert_box_record(db, record)
                     imported += 1
                     imported_boxes += 1
-                except sqlite3.DatabaseError as exc:
+                except DatabaseError as exc:
                     errors.append(f"Could not import box {record.get('name')}: {exc}")
             for order in db.execute("SELECT id FROM orders").fetchall():
                 _relink_order_items(db, order["id"])
+            apply_tsca_catalog(db)
             return {
                 "imported": imported,
                 "imported_products": imported_products,
@@ -1517,13 +1781,16 @@ async def import_catalog(catalog_type: str, file: UploadFile = File(...)) -> dic
             }
         for record in records:
             try:
-                if catalog_type == "products":
-                    _upsert_product_record(db, record)
-                else:
-                    _upsert_box_record(db, record)
+                with db.savepoint():
+                    if catalog_type == "products":
+                        _upsert_product_record(db, record)
+                    else:
+                        _upsert_box_record(db, record)
                 imported += 1
-            except sqlite3.DatabaseError as exc:
+            except DatabaseError as exc:
                 errors.append(f"Could not import {record}: {exc}")
+        if catalog_type == "products":
+            apply_tsca_catalog(db)
     return {"imported": imported, "errors": errors}
 
 
@@ -1583,7 +1850,7 @@ class ClientPayload(BaseModel):
     shipping_address: str = Field(default="", max_length=2000)
 
 
-def _client_or_404(db: sqlite3.Connection, client_id: int) -> sqlite3.Row:
+def _client_or_404(db: Database, client_id: int) -> Any:
     row = db.execute("SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
     if row is None:
         raise HTTPException(404, "Client not found.")
@@ -1605,7 +1872,7 @@ def update_client(client_id: int, payload: ClientPayload) -> dict[str, Any]:
                  values["contact_name"], values["address"], values["country"],
                  values["shipping_address"], now_iso(), client_id),
             )
-        except sqlite3.IntegrityError as exc:
+        except IntegrityError as exc:
             raise HTTPException(409, "Another client already uses this customer name.") from exc
         return with_country_code(dict(_client_or_404(db, client_id)))
 

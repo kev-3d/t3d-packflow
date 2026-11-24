@@ -87,11 +87,10 @@ class RequirementsFlowTest(unittest.TestCase):
     def make_order(self, client):
         with database.connect() as db:
             now = database.now_iso()
-            cursor = db.execute(
-                "INSERT INTO orders (order_number, client, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            return db.insert_returning_id(
+                "INSERT INTO orders (order_number, client, created_at, updated_at) VALUES (?, ?, ?, ?) RETURNING id",
                 (f"PO-{client}", client, now, now),
             )
-            return cursor.lastrowid
 
     def seed(self):
         return self.upload([

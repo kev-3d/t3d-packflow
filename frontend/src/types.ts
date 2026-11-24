@@ -103,6 +103,7 @@ export interface PackingResult {
   dhl_zone?: number
   dhl_zone_assumed?: boolean
   options?: PackingOption[]
+  settings?: { allowance_cm: number; gap_cm: number; use_capacities: boolean; allow_on_side: boolean; max_parcel_kg: number | null }
   status: string
   box_count: number
   unit_count: number
@@ -178,10 +179,12 @@ export interface Product {
   width_cm: number
   height_cm: number
   weight_kg: number
-  price_eur: number
   rotation_allowed: number
   fragile: number
   active: number
+  ean?: string
+  tsca_name?: string
+  tsca_description?: string
 }
 
 export interface BoxType {
@@ -193,6 +196,8 @@ export interface BoxType {
   height_cm: number
   empty_weight_kg: number
   max_weight_kg: number
+  reference_50ml: number | null
+  reference_250ml: number | null
   active: number
 }
 
@@ -332,3 +337,29 @@ export interface SavedShippingQuote {
 }
 
 export interface ShippingQuoteResponse { quote: SavedShippingQuote | null; stale: boolean; detected_destination: DetectedDestination | null }
+
+export type TscaCertification = '' | 'positive' | 'negative'
+
+export interface TscaItem {
+  product_id: number | null
+  number: string
+  name: string
+  description: string
+}
+
+export interface TscaDraft {
+  date: string
+  reference: string
+  certification: TscaCertification
+  items: TscaItem[]
+}
+
+export interface TscaState {
+  eligible: boolean
+  destination: { code: string; name: string } | null
+  saved: boolean
+  confirmed: boolean
+  updated_at: string | null
+  draft: TscaDraft
+  issues: string[]
+}

@@ -16,7 +16,7 @@ from app.main import (
     delete_all_orders, delete_box, delete_order, delete_product, download_analysis_report, export_order_pdf, get_order, list_analysis_reports,
     review_order, save_analysis_report,
 )
-from app.packing import fill_existing_plan, pack_order
+from app.packing import PackingSettings, fill_existing_plan, pack_order
 
 EMAIL = """Hi Alex,
 Could you please provide the pricing and lead time for the following items?
@@ -40,19 +40,24 @@ def box(id=1, length=6, width=6, height=6, max_weight=20):
                 max_weight_kg=max_weight)
 
 
+def pack_exact(*args, **kwargs):
+    """These cases use exact fits, so they pack without a wall allowance."""
+    return pack_order(*args, settings=PackingSettings(allowance_cm=0), **kwargs)
+
+
 class OptimizationTests(unittest.TestCase):
     def test_prefers_fewer_boxes_over_less_empty_volume(self):
-        result = pack_order([product(2)], [box(), box(2, 13, 7, 7)])
+        result = pack_exact([product(2)], [box(), box(2, 13, 7, 7)])
         self.assertEqual(result["box_count"], 1)
         self.assertEqual(result["boxes"][0]["box_code"], "B2")
 
     def test_uses_fewest_boxes_then_smallest_closing_box(self):
         # 9 cubes: one 18x18x6 box takes all of them; 3 small boxes would leave no gaps.
-        result = pack_order([product(9)], [box(), box(2, 12, 12, 6), box(3, 18, 18, 6), box(4, 30, 30, 30)])
+        result = pack_exact([product(9)], [box(), box(2, 12, 12, 6), box(3, 18, 18, 6), box(4, 30, 30, 30)])
         self.assertEqual(result["box_count"], 1)
         self.assertEqual(result["boxes"][0]["box_code"], "B3")
         # 10 cubes need two boxes: a full 18x18x6 and the smallest box for the last cube.
-        result = pack_order([product(10)], [box(), box(3, 18, 18, 6)])
+        result = pack_exact([product(10)], [box(), box(3, 18, 18, 6)])
         self.assertEqual(sorted(b["box_code"] for b in result["boxes"]), ["B1", "B3"])
 
     def test_objectives_trade_box_count_for_volume_and_dhl_cost(self):
@@ -60,9 +65,9 @@ class OptimizationTests(unittest.TestCase):
         # less carton volume; DHL volumetric weight follows carton volume for light goods.
         rows = [dict(product(16), weight_kg=.05)]
         boxes = [box(1, 12, 12, 12), box(2, 30, 30, 30)]
-        fewest = pack_order(rows, boxes, "fewest_boxes", dhl_zone=1)
-        volume = pack_order(rows, boxes, "smallest_volume", dhl_zone=1)
-        cost = pack_order(rows, boxes, "lowest_dhl_cost", dhl_zone=1)
+        fewest = pack_exact(rows, boxes, "fewest_boxes", dhl_zone=1)
+        volume = pack_exact(rows, boxes, "smallest_volume", dhl_zone=1)
+        cost = pack_exact(rows, boxes, "lowest_dhl_cost", dhl_zone=1)
         self.assertEqual((fewest["box_count"], fewest["boxes"][0]["box_code"]), (1, "B2"))
         self.assertEqual(volume["box_count"], 2)
         self.assertTrue(all(b["box_code"] == "B1" for b in volume["boxes"]))
@@ -76,22 +81,22 @@ class OptimizationTests(unittest.TestCase):
 
     def test_unknown_objective_is_rejected(self):
         with self.assertRaises(ValueError):
-            pack_order([product()], [box()], "cheapest")
+            pack_exact([product()], [box()], "cheapest")
 
     def test_weight_limit_forces_another_box(self):
-        result = pack_order([product(4)], [box(1, 30, 30, 30, max_weight=3)])
+        result = pack_exact([product(4)], [box(1, 30, 30, 30, max_weight=3)])
         self.assertEqual(result["status"], "complete")
         self.assertEqual(result["box_count"], 2)
         self.assertTrue(all(b["gross_weight_kg"] <= 3 for b in result["boxes"]))
 
     def test_smallest_box_that_fits_whole_order_is_used(self):
-        result = pack_order([product(2)], [box(1, 13, 6, 6), box(2, 20, 10, 10)])
+        result = pack_exact([product(2)], [box(1, 13, 6, 6), box(2, 20, 10, 10)])
         self.assertEqual(result["box_count"], 1)
         self.assertEqual(result["boxes"][0]["box_code"], "B1")
 
     def test_filler_cannot_enlarge_box_or_exceed_weight(self):
         rows = [product()]
-        base = pack_order(rows, [box(1, 12, 6, 6, max_weight=2.1), box(2, 20, 10, 10)])
+        base = pack_exact(rows, [box(1, 12, 6, 6, max_weight=2.1), box(2, 20, 10, 10)])
         result = fill_existing_plan(base, rows, [product(3)])
         self.assertEqual(len(result["unplaced"]), 3)
         self.assertEqual(result["boxes"][0]["placements"], base["boxes"][0]["placements"])
@@ -100,7 +105,7 @@ class OptimizationTests(unittest.TestCase):
     def test_no_overlap_bounds_and_weight_in_mixed_order(self):
         rows = [product(7), dict(product(5), sku="Q", order_item_id=2,
                                 length_cm=3, width_cm=4, height_cm=5, rotation_allowed=True)]
-        result = pack_order(rows, [box(1, 14, 13, 12, max_weight=8), box(2, 20, 20, 20)])
+        result = pack_exact(rows, [box(1, 14, 13, 12, max_weight=8), box(2, 20, 20, 20)])
         self.assertEqual(result["status"], "complete")
         seen = set()
         for b in result["boxes"]:

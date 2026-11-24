@@ -88,27 +88,29 @@ export function Catalog({ products, boxes, onRefresh, notify }: CatalogProps) {
         {!(tab === 'products' ? filteredProducts : filteredBoxes).length && <div className="empty-row">{query ? 'No matches. Try another name.' : 'Your catalog is empty. Add a record or import an Excel file.'}</div>}
         {tab === 'products' ? (
           <div className="catalog-table product-table" role="region" aria-label="Product catalog" tabIndex={0}>
-            <div className="catalog-table-head"><span>PRODUCT</span><span>DIMENSIONS</span><span>PRICE</span><span>WEIGHT</span><span>ROTATION</span><span>STATUS</span></div>
+            <div className="catalog-table-head"><span>PRODUCT</span><span>DIMENSIONS</span><span>WEIGHT</span><span>ROTATION</span><span>TYPE</span><span>STATUS</span></div>
             {filteredProducts.map((product) => (
               <div key={product.id} className="catalog-row">
                 <span><i className="product-cube" /><b>{product.name}</b><small>Matched by description</small></span>
                 <span><Ruler size={15} /> {product.length_cm} × {product.width_cm} × {product.height_cm} cm</span>
-                <span>€{(product.price_eur ?? 0).toFixed(2)}</span>
                 <span>{product.weight_kg.toFixed(3)} kg</span>
-                <span><RotateCcw size={15} /> {product.rotation_allowed ? 'Allowed' : 'Fixed'}{product.fragile ? ' · Fragile' : ''}</span>
+                <span><RotateCcw size={15} /> {product.rotation_allowed ? 'Allowed' : 'Fixed'}</span>
+                <span>{product.fragile ? 'Fragile' : 'Standard'}</span>
                 <div className="catalog-row-end"><Badge className="status-pill status-pill--packed"><i />Active</Badge><button type="button" className="row-delete-button row-edit-button" aria-label={`Edit product ${product.name}`} title="Edit product" onClick={() => setEditing(product)}><Pencil size={16} /></button><button type="button" className="row-delete-button" aria-label={`Delete product ${product.name}`} title="Delete product" onClick={() => askDelete({ type: 'products', id: product.id, label: product.name })}><Trash2 size={16} /></button></div>
               </div>
             ))}
           </div>
         ) : (
           <div className="catalog-table box-table" role="region" aria-label="Box catalog" tabIndex={0}>
-            <div className="catalog-table-head"><span>BOX</span><span>INTERNAL DIMENSIONS</span><span>EMPTY WEIGHT</span><span>MAX. WEIGHT</span><span>VOLUME</span><span>STATUS</span></div>
+            <div className="catalog-table-head"><span>BOX</span><span>INTERNAL DIMENSIONS</span><span>EMPTY WEIGHT</span><span>MAX. WEIGHT</span><span>VOLUME</span><span title="Theoretical number of 50 ml products that fit (reference)">50ML REF.</span><span title="Theoretical number of 250 ml products that fit (reference)">250ML REF.</span><span>STATUS</span></div>
             {filteredBoxes.map((box) => (
               <div key={box.id} className="catalog-row">
                 <span><i className="box-icon-mini"><Box size={16} /></i><b>{box.code}</b><small>{box.name}</small></span>
                 <span><Ruler size={15} /> {box.length_cm} × {box.width_cm} × {box.height_cm} cm</span>
                 <span>{box.empty_weight_kg.toFixed(2)} kg</span><span>{box.max_weight_kg.toFixed(1)} kg</span>
                 <span>{((box.length_cm * box.width_cm * box.height_cm) / 1000).toFixed(1)} L</span>
+                <span>{box.reference_50ml ?? '—'}</span>
+                <span>{box.reference_250ml ?? '—'}</span>
                 <div className="catalog-row-end"><Badge className="status-pill status-pill--packed"><i />Active</Badge><button type="button" className="row-delete-button row-edit-button" aria-label={`Edit box ${box.code}`} title="Edit box" onClick={() => setEditing(box)}><Pencil size={16} /></button><button type="button" className="row-delete-button" aria-label={`Delete box ${box.code}`} title="Delete box" onClick={() => askDelete({ type: 'boxes', id: box.id, label: box.code })}><Trash2 size={16} /></button></div>
               </div>
             ))}
@@ -155,13 +157,14 @@ function CatalogForm({ type, record, onClose, onSaved }: { type: 'products' | 'b
     setBusy(true)
     const data = new FormData(event.currentTarget)
     const number = (name: string) => Number(data.get(name))
+    const optionalInt = (name: string) => (data.get(name) === '' ? null : Number(data.get(name)))
     try {
       if (type === 'products') {
-        const payload = { name: data.get('name'), length_cm: number('length'), width_cm: number('width'), height_cm: number('height'), weight_kg: number('weight'), price_eur: number('price'), rotation_allowed: product ? Boolean(product.rotation_allowed) : true, fragile: product ? Boolean(product.fragile) : false }
+        const payload = { name: data.get('name'), length_cm: number('length'), width_cm: number('width'), height_cm: number('height'), weight_kg: number('weight'), rotation_allowed: product ? Boolean(product.rotation_allowed) : true, fragile: product ? Boolean(product.fragile) : false, ean: String(data.get('ean') ?? ''), tsca_name: String(data.get('tscaName') ?? ''), tsca_description: String(data.get('tscaDescription') ?? '') }
         if (product) await api.updateProduct(product.id, payload)
         else await api.createProduct(payload)
       } else {
-        const payload = { code: data.get('code'), name: data.get('name'), length_cm: number('length'), width_cm: number('width'), height_cm: number('height'), empty_weight_kg: number('weight'), max_weight_kg: number('maxWeight') }
+        const payload = { code: data.get('code'), name: data.get('name'), length_cm: number('length'), width_cm: number('width'), height_cm: number('height'), empty_weight_kg: number('weight'), max_weight_kg: number('maxWeight'), reference_50ml: optionalInt('ref50'), reference_250ml: optionalInt('ref250') }
         if (box) await api.updateBox(box.id, payload)
         else await api.createBox(payload)
       }
@@ -183,8 +186,12 @@ function CatalogForm({ type, record, onClose, onSaved }: { type: 'products' | 'b
           <label><span>Width (cm)</span><Input name="width" type="number" step="0.01" min="0.01" required defaultValue={record?.width_cm} /></label>
           <label><span>Height (cm)</span><Input name="height" type="number" step="0.01" min="0.01" required defaultValue={record?.height_cm} /></label>
           <label><span>{type === 'products' ? 'Weight (kg)' : 'Empty weight (kg)'}</span><Input name="weight" type="number" step="0.001" min={type === 'products' ? '0.001' : '0'} required defaultValue={product?.weight_kg ?? box?.empty_weight_kg} /></label>
-          {type === 'products' && <label><span>Price (€)</span><Input name="price" type="number" step="0.01" min="0" required defaultValue={product?.price_eur ?? 0} /></label>}
+          {type === 'products' && <label><span>EAN (TSCA product number)</span><Input name="ean" maxLength={32} inputMode="numeric" placeholder="5350583000191" defaultValue={product?.ean ?? ''} /></label>}
+          {type === 'products' && <label><span>TSCA declaration name</span><Input name="tscaName" maxLength={500} placeholder="Defaults to the product name" defaultValue={product?.tsca_name ?? ''} /></label>}
+          {type === 'products' && <label className="form-grid__wide"><span>TSCA declaration description</span><textarea name="tscaDescription" rows={3} maxLength={4000} placeholder="Product description printed on the TSCA certification" defaultValue={product?.tsca_description ?? ''} /></label>}
           {type === 'boxes' && <label><span>Max. weight (kg)</span><Input name="maxWeight" type="number" step="0.01" min="0.01" required defaultValue={box?.max_weight_kg} /></label>}
+          {type === 'boxes' && <label><span>50 ml reference (units)</span><Input name="ref50" type="number" step="1" min="0" defaultValue={box?.reference_50ml ?? ''} /></label>}
+          {type === 'boxes' && <label><span>250 ml reference (units)</span><Input name="ref250" type="number" step="1" min="0" defaultValue={box?.reference_250ml ?? ''} /></label>}
         </div>
         {error && <p role="alert" className="form-error">{error}</p>}
         <footer><Button type="button" className="button button--ghost" disabled={busy} onClick={onClose}>Cancel</Button><Button className="button button--accent" disabled={busy}>{busy ? 'Saving…' : record ? 'Save changes' : 'Save record'}</Button></footer>
