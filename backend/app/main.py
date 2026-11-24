@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import hashlib
+import logging
 import re
 import unicodedata
 from difflib import SequenceMatcher
@@ -12,7 +13,7 @@ from datetime import date
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from openpyxl import Workbook
@@ -44,8 +45,12 @@ from .reports import render_analysis_pdf
 from .shipping_docs import DEFAULT_EXPORTER, build_shipment, render_packing_list_pdf
 from . import tsca
 from .naming import normalize_product_name
-from .env import load_env
+from .auth import bootstrap_admins, configuration_problems, current_user, require_admin
+from .auth_routes import router as auth_router
+from .env import PROJECT_ENV, PROJECT_ENV_LOCAL, load_env
 from .slack_notify import notify_plan_ready
+
+logger = logging.getLogger("packflow")
 
 
 class ProductPayload(BaseModel):
@@ -550,8 +555,14 @@ def _ensure_demo_plans() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    load_env(prefix="SLACK_")  # Local uvicorn runs; Compose already injects these.
+    # Local uvicorn runs; Compose already injects these. .env.local wins over .env.
+    for env_file in (PROJECT_ENV_LOCAL, PROJECT_ENV):
+        load_env(env_file, prefix=("SLACK_", "CLERK_", "VITE_CLERK_", "AUTH_"))
+    if problems := configuration_problems():
+        logger.warning("Sign-in is disabled (every API call answers 503): %s. Set them in %s or the environment.",
+                       "; ".join(problems), PROJECT_ENV)
     init_db()
+    bootstrap_admins()
     _ensure_demo_plans()
     yield
 
@@ -561,6 +572,8 @@ app = FastAPI(
     version="0.1.0",
     description="Purchase order extraction and 3D packing planning.",
     lifespan=lifespan,
+    # Deny by default: every route needs a signed-in, active user (see auth.PUBLIC_PATHS).
+    dependencies=[Depends(current_user)],
 )
 app.add_middleware(
     CORSMiddleware,
@@ -570,6 +583,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(requirements_router)
+app.include_router(auth_router)
 
 
 @app.get("/api/health")
@@ -633,7 +647,7 @@ def list_orders() -> list[dict[str, Any]]:
         return _order_summary_rows(db)
 
 
-@app.delete("/api/orders")
+@app.delete("/api/orders", dependencies=[Depends(require_admin)])
 def delete_all_orders() -> dict[str, int]:
     with connect() as db:
         # Foreign key cascades remove items, packing plans and saved PDFs atomically.
@@ -643,7 +657,7 @@ def delete_all_orders() -> dict[str, int]:
     return {"deleted_orders": count}
 
 
-@app.delete("/api/orders/{order_id}")
+@app.delete("/api/orders/{order_id}", dependencies=[Depends(require_admin)])
 def delete_order(order_id: int) -> dict[str, Any]:
     with connect() as db:
         row = db.execute("SELECT order_number FROM orders WHERE id = ?", (order_id,)).fetchone()
@@ -1120,7 +1134,7 @@ def get_exporter() -> dict[str, str]:
         return _load_exporter(db)
 
 
-@app.put("/api/settings/exporter")
+@app.put("/api/settings/exporter", dependencies=[Depends(require_admin)])
 def update_exporter(payload: ExporterPayload) -> dict[str, str]:
     with connect() as db:
         db.execute("INSERT INTO app_settings (key, value) VALUES ('exporter_profile', ?) "
@@ -1533,7 +1547,7 @@ def list_boxes() -> list[dict[str, Any]]:
         return rows_to_dicts(db.execute("SELECT * FROM box_types ORDER BY code").fetchall())
 
 
-@app.post("/api/catalog/products", status_code=201)
+@app.post("/api/catalog/products", status_code=201, dependencies=[Depends(require_admin)])
 def create_product(payload: ProductPayload) -> dict[str, Any]:
     with connect() as db:
         existing = _find_product_by_description(db, payload.name)
@@ -1565,7 +1579,7 @@ def create_product(payload: ProductPayload) -> dict[str, Any]:
         return dict(db.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone())
 
 
-@app.post("/api/catalog/boxes", status_code=201)
+@app.post("/api/catalog/boxes", status_code=201, dependencies=[Depends(require_admin)])
 def create_box(payload: BoxPayload) -> dict[str, Any]:
     with connect() as db:
         try:
@@ -1590,7 +1604,7 @@ def create_box(payload: BoxPayload) -> dict[str, Any]:
         return dict(db.execute("SELECT * FROM box_types WHERE id = ?", (box_id,)).fetchone())
 
 
-@app.put("/api/catalog/products/{product_id}")
+@app.put("/api/catalog/products/{product_id}", dependencies=[Depends(require_admin)])
 def update_product(product_id: int, payload: ProductPayload) -> dict[str, Any]:
     name = payload.name.strip()
     if not name:
@@ -1624,7 +1638,7 @@ def update_product(product_id: int, payload: ProductPayload) -> dict[str, Any]:
         return dict(db.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone())
 
 
-@app.put("/api/catalog/boxes/{box_id}")
+@app.put("/api/catalog/boxes/{box_id}", dependencies=[Depends(require_admin)])
 def update_box(box_id: int, payload: BoxPayload) -> dict[str, Any]:
     code, name = payload.code.strip().upper(), payload.name.strip()
     if not code or not name:
@@ -1653,7 +1667,7 @@ def update_box(box_id: int, payload: BoxPayload) -> dict[str, Any]:
         return dict(db.execute("SELECT * FROM box_types WHERE id = ?", (box_id,)).fetchone())
 
 
-@app.delete("/api/catalog/products/{product_id}")
+@app.delete("/api/catalog/products/{product_id}", dependencies=[Depends(require_admin)])
 def delete_product(product_id: int) -> dict[str, Any]:
     with connect() as db:
         row = db.execute("SELECT name FROM products WHERE id = ?", (product_id,)).fetchone()
@@ -1665,7 +1679,7 @@ def delete_product(product_id: int) -> dict[str, Any]:
     return {"deleted_product_id": product_id, "name": row["name"]}
 
 
-@app.delete("/api/catalog/boxes/{box_id}")
+@app.delete("/api/catalog/boxes/{box_id}", dependencies=[Depends(require_admin)])
 def delete_box(box_id: int) -> dict[str, Any]:
     with connect() as db:
         row = db.execute("SELECT code FROM box_types WHERE id = ?", (box_id,)).fetchone()
@@ -1736,7 +1750,7 @@ def _upsert_box_record(db: Database, record: dict[str, Any]) -> None:
     )
 
 
-@app.post("/api/catalog/{catalog_type}/import")
+@app.post("/api/catalog/{catalog_type}/import", dependencies=[Depends(require_admin)])
 async def import_catalog(catalog_type: str, file: UploadFile = File(...)) -> dict[str, Any]:
     if catalog_type not in {"products", "boxes"}:
         raise HTTPException(404, "Unknown catalog.")
@@ -1801,7 +1815,7 @@ def list_clients() -> list[dict[str, Any]]:
     return [with_country_code(dict(row)) for row in rows]
 
 
-@app.post("/api/clients/import")
+@app.post("/api/clients/import", dependencies=[Depends(require_admin)])
 async def import_clients(file: UploadFile = File(...)) -> dict[str, Any]:
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm")):
         raise HTTPException(400, "Upload an Excel .xlsx file.")
@@ -1857,7 +1871,7 @@ def _client_or_404(db: Database, client_id: int) -> Any:
     return row
 
 
-@app.patch("/api/clients/{client_id}")
+@app.patch("/api/clients/{client_id}", dependencies=[Depends(require_admin)])
 def update_client(client_id: int, payload: ClientPayload) -> dict[str, Any]:
     values = {field: value.strip() for field, value in payload.model_dump().items()}
     if not values["customer"]:
@@ -1877,7 +1891,7 @@ def update_client(client_id: int, payload: ClientPayload) -> dict[str, Any]:
         return with_country_code(dict(_client_or_404(db, client_id)))
 
 
-@app.delete("/api/clients")
+@app.delete("/api/clients", dependencies=[Depends(require_admin)])
 def delete_all_clients() -> dict[str, int]:
     with connect() as db:
         count = db.execute("SELECT COUNT(*) FROM clients").fetchone()[0]
@@ -1885,7 +1899,7 @@ def delete_all_clients() -> dict[str, int]:
     return {"deleted_clients": count}
 
 
-@app.delete("/api/clients/{client_id}")
+@app.delete("/api/clients/{client_id}", dependencies=[Depends(require_admin)])
 def delete_client(client_id: int) -> dict[str, Any]:
     with connect() as db:
         row = _client_or_404(db, client_id)

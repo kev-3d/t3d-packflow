@@ -10,9 +10,12 @@ import { Clients } from './pages/Clients'
 import { Dashboard } from './pages/Dashboard'
 import { OrderDetail } from './pages/OrderDetail'
 import { Orders } from './pages/Orders'
+import { Users } from './pages/Users'
+import { useCurrentUser } from './auth'
 import type { AnalysisReport, BoxType, DashboardData, OrderDetailData, OrderSummary, Page, Product } from './types'
 
 function App() {
+  const { is_admin: isAdmin } = useCurrentUser()
   const [page, setPage] = useState<Page>('dashboard')
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [orders, setOrders] = useState<OrderSummary[]>([])
@@ -143,6 +146,7 @@ function App() {
           {page === 'orders' && <Orders orders={orders} onDeleteAll={showDeleteOrders} onDelete={showDeleteOrder} onOpen={openOrder} />}
           {page === 'catalog' && <Catalog products={products} boxes={boxes} onRefresh={loadCatalog} notify={notify} />}
           {page === 'clients' && <Clients notify={notify} />}
+          {page === 'users' && isAdmin && <Users notify={notify} />}
           {page === 'order' && order && <OrderDetail order={order} onBack={() => setPage('orders')} onRefresh={refreshCurrentOrder} onSaved={finishPackingPlan} notify={notify} />}
         </>
       )}

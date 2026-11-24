@@ -1,4 +1,51 @@
-export type Page = 'dashboard' | 'orders' | 'catalog' | 'clients' | 'order'
+export type Page = 'dashboard' | 'orders' | 'catalog' | 'clients' | 'users' | 'order'
+
+export type Role = 'admin' | 'user'
+
+export interface AuthConfig {
+  configured: boolean
+  publishable_key: string
+}
+
+/** The signed-in user as the backend sees it; the role always comes from the server. */
+export interface CurrentUser {
+  id: number
+  email: string
+  full_name: string
+  role: Role
+  is_admin: boolean
+}
+
+export interface AppUser {
+  id: number
+  email: string
+  full_name: string
+  role: Role
+  is_active: boolean
+  /** Has signed in at least once (linked to a Clerk account). */
+  linked: boolean
+  created_at: string
+  last_login_at: string | null
+}
+
+export interface NewUserInput {
+  email: string
+  full_name: string
+  role: Role
+  send_invitation: boolean
+}
+
+export interface NewUserResult {
+  user: AppUser
+  invitation: 'sent' | 'failed' | 'skipped'
+  invitation_error?: string
+}
+
+export interface UserUpdate {
+  full_name?: string
+  role?: Role
+  is_active?: boolean
+}
 
 export interface OrderSummary {
   id: number

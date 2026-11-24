@@ -18,3 +18,15 @@ services:
         value: /app/data/packflow.db
       - key: DATABASE_URL
         sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_AUTHORIZED_PARTIES
+        sync: false
+      - key: AUTH_ALLOWED_EMAIL_DOMAINS
+        sync: false
+      - key: AUTH_BOOTSTRAP_ADMINS
+        sync: false
+      - key: AUTH_APP_URL
+        sync: false

@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from pypdf import PdfReader
 
 from app import database
+from app.auth import User, current_user
 from app.extraction import extract_email
 from app.main import (
     EmailOrderPayload, OrderItemPayload, OrderReviewPayload, SuggestedItemPayload,
@@ -179,7 +180,12 @@ class BackendFeatureTests(unittest.TestCase):
             self.assertEqual(json.loads(content)["deleted_orders"], 4)
             status, content = await request("GET", "/api/orders")
             self.assertEqual(json.loads(content), [])
-        asyncio.run(scenario())
+        # Authentication is covered in test_auth.py; here the caller is a signed-in admin.
+        app.dependency_overrides[current_user] = lambda: User(id=1, email="admin@example.com", full_name="", role="admin")
+        try:
+            asyncio.run(scenario())
+        finally:
+            app.dependency_overrides.pop(current_user, None)
 
     def test_delete_catalog_records_unmatches_orders_and_does_not_reseed(self):
         order = self.make_order()

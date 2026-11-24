@@ -5,6 +5,7 @@ import { AlertTriangle, Box, FileSpreadsheet, LoaderCircle, PackagePlus, Pencil,
 import { createPortal } from 'react-dom'
 import { useMemo, useRef, useState } from 'react'
 import { api } from '../api'
+import { useCurrentUser } from '../auth'
 import { useDialogFocus } from '../hooks/useDialogFocus'
 import type { BoxType, Product } from '../types'
 
@@ -16,6 +17,7 @@ interface CatalogProps {
 }
 
 export function Catalog({ products, boxes, onRefresh, notify }: CatalogProps) {
+  const { is_admin: isAdmin } = useCurrentUser()
   const [tab, setTab] = useState<'products' | 'boxes'>('products')
   const [query, setQuery] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -79,13 +81,13 @@ export function Catalog({ products, boxes, onRefresh, notify }: CatalogProps) {
       <section className="panel data-panel catalog-panel">
         <div className="table-tools">
           <label><Search size={17} /><Input aria-label="Search the catalog" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${tab === 'products' ? 'product' : 'box'}…`} /></label>
-          <div>
+          {isAdmin && <div>
             <input ref={fileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={(e) => importFile(e.target.files?.[0])} />
             <button disabled={busy} onClick={() => fileRef.current?.click()}><FileSpreadsheet size={16} /> {busy ? 'Importing…' : 'Import Excel'}</button>
             <Button className="button button--accent button--small" onClick={() => setShowForm(true)}><Plus size={16} /> {tab === 'products' ? 'Add product' : 'Add box'}</Button>
-          </div>
+          </div>}
         </div>
-        {!(tab === 'products' ? filteredProducts : filteredBoxes).length && <div className="empty-row">{query ? 'No matches. Try another name.' : 'Your catalog is empty. Add a record or import an Excel file.'}</div>}
+        {!(tab === 'products' ? filteredProducts : filteredBoxes).length && <div className="empty-row">{query ? 'No matches. Try another name.' : 'Your catalog is empty.' + (isAdmin ? ' Add a record or import an Excel file.' : ' Ask an administrator to add records.')}</div>}
         {tab === 'products' ? (
           <div className="catalog-table product-table" role="region" aria-label="Product catalog" tabIndex={0}>
             <div className="catalog-table-head"><span>PRODUCT</span><span>DIMENSIONS</span><span>WEIGHT</span><span>ROTATION</span><span>TYPE</span><span>STATUS</span></div>
@@ -96,7 +98,7 @@ export function Catalog({ products, boxes, onRefresh, notify }: CatalogProps) {
                 <span>{product.weight_kg.toFixed(3)} kg</span>
                 <span><RotateCcw size={15} /> {product.rotation_allowed ? 'Allowed' : 'Fixed'}</span>
                 <span>{product.fragile ? 'Fragile' : 'Standard'}</span>
-                <div className="catalog-row-end"><Badge className="status-pill status-pill--packed"><i />Active</Badge><button type="button" className="row-delete-button row-edit-button" aria-label={`Edit product ${product.name}`} title="Edit product" onClick={() => setEditing(product)}><Pencil size={16} /></button><button type="button" className="row-delete-button" aria-label={`Delete product ${product.name}`} title="Delete product" onClick={() => askDelete({ type: 'products', id: product.id, label: product.name })}><Trash2 size={16} /></button></div>
+                <div className="catalog-row-end"><Badge className="status-pill status-pill--packed"><i />Active</Badge>{isAdmin && <><button type="button" className="row-delete-button row-edit-button" aria-label={`Edit product ${product.name}`} title="Edit product" onClick={() => setEditing(product)}><Pencil size={16} /></button><button type="button" className="row-delete-button" aria-label={`Delete product ${product.name}`} title="Delete product" onClick={() => askDelete({ type: 'products', id: product.id, label: product.name })}><Trash2 size={16} /></button></>}</div>
               </div>
             ))}
           </div>
@@ -111,7 +113,7 @@ export function Catalog({ products, boxes, onRefresh, notify }: CatalogProps) {
                 <span>{((box.length_cm * box.width_cm * box.height_cm) / 1000).toFixed(1)} L</span>
                 <span>{box.reference_50ml ?? '—'}</span>
                 <span>{box.reference_250ml ?? '—'}</span>
-                <div className="catalog-row-end"><Badge className="status-pill status-pill--packed"><i />Active</Badge><button type="button" className="row-delete-button row-edit-button" aria-label={`Edit box ${box.code}`} title="Edit box" onClick={() => setEditing(box)}><Pencil size={16} /></button><button type="button" className="row-delete-button" aria-label={`Delete box ${box.code}`} title="Delete box" onClick={() => askDelete({ type: 'boxes', id: box.id, label: box.code })}><Trash2 size={16} /></button></div>
+                <div className="catalog-row-end"><Badge className="status-pill status-pill--packed"><i />Active</Badge>{isAdmin && <><button type="button" className="row-delete-button row-edit-button" aria-label={`Edit box ${box.code}`} title="Edit box" onClick={() => setEditing(box)}><Pencil size={16} /></button><button type="button" className="row-delete-button" aria-label={`Delete box ${box.code}`} title="Delete box" onClick={() => askDelete({ type: 'boxes', id: box.id, label: box.code })}><Trash2 size={16} /></button></>}</div>
               </div>
             ))}
           </div>

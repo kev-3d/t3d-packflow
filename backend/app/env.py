@@ -9,9 +9,11 @@ import os
 from pathlib import Path
 
 PROJECT_ENV = Path(__file__).resolve().parents[2] / ".env"
+# Optional local overrides (not committed); loaded first, so its values win over .env.
+PROJECT_ENV_LOCAL = PROJECT_ENV.with_name(".env.local")
 
 
-def load_env(path: Path = PROJECT_ENV, prefix: str = "") -> None:
+def load_env(path: Path = PROJECT_ENV, prefix: str | tuple[str, ...] = "") -> None:
     if not path.is_file():
         return
     for raw in path.read_text(encoding="utf-8").splitlines():

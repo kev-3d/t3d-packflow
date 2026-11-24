@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from .auth import require_admin
 from .database import Database, IntegrityError, connect, now_iso
 from .requirements import (
     REQUIREMENT_TEXT_FIELDS, Prepared, best_match, company_name_variants, name_key,
@@ -109,7 +110,7 @@ def list_client_requirements() -> list[dict[str, Any]]:
         return [_public(row, clients) for row in _load_requirements(db)]
 
 
-@router.post("/api/client-requirements/import")
+@router.post("/api/client-requirements/import", dependencies=[Depends(require_admin)])
 async def import_client_requirements(file: UploadFile = File(...)) -> dict[str, Any]:
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm")):
         raise HTTPException(400, "Upload an Excel .xlsx file.")
@@ -169,7 +170,7 @@ class ClientRequirementPayload(BaseModel):
     comments: str = Field(default="", max_length=4000)
 
 
-@router.patch("/api/client-requirements/{requirement_id}")
+@router.patch("/api/client-requirements/{requirement_id}", dependencies=[Depends(require_admin)])
 def update_client_requirement(requirement_id: int, payload: ClientRequirementPayload) -> dict[str, Any]:
     company = payload.company.strip()
     if not name_key(company):
@@ -191,7 +192,7 @@ def update_client_requirement(requirement_id: int, payload: ClientRequirementPay
         return _fetch_public(db, requirement_id)
 
 
-@router.delete("/api/client-requirements")
+@router.delete("/api/client-requirements", dependencies=[Depends(require_admin)])
 def delete_all_client_requirements() -> dict[str, int]:
     with connect() as db:
         count = db.execute("SELECT COUNT(*) FROM client_requirements").fetchone()[0]
@@ -199,7 +200,7 @@ def delete_all_client_requirements() -> dict[str, int]:
     return {"deleted_requirements": count}
 
 
-@router.delete("/api/client-requirements/{requirement_id}")
+@router.delete("/api/client-requirements/{requirement_id}", dependencies=[Depends(require_admin)])
 def delete_client_requirement(requirement_id: int) -> dict[str, Any]:
     with connect() as db:
         row = db.execute("SELECT company FROM client_requirements WHERE id = ?", (requirement_id,)).fetchone()

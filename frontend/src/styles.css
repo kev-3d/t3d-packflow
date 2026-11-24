@@ -1102,3 +1102,27 @@ h1[tabindex="-1"]:focus { outline: none; }
   .tsca-item__index { grid-row: auto; padding-top: 0; }
   .tsca-item__description { grid-column: auto; }
 }
+
+/* ---------- Authentication ---------- */
+.auth-screen { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; padding: 32px 16px; background: var(--bg, #f7f7f5); }
+.auth-brand { display: flex; align-items: center; gap: 10px; }
+.auth-brand img { border-radius: 8px; }
+.auth-brand strong { font: 800 22px/1 'Plus Jakarta Sans', sans-serif; }
+.auth-brand strong span { color: var(--brand-orange); }
+.auth-brand small { color: var(--muted); font-size: 12px; }
+.auth-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.topbar-user { display: flex; align-items: center; min-width: 36px; }
+
+/* ---------- Users (admin) ---------- */
+.users-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.users-table th { text-align: left; padding: 12px 16px; color: var(--muted); font: 600 11px/1 'Plus Jakarta Sans', sans-serif; letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid var(--line); }
+.users-table td { padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.users-table td small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.users-table select { min-height: 36px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: white; }
+.users-table .users-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.users-table-wrap { overflow-x: auto; }
+.users-form { display: grid; grid-template-columns: minmax(180px, 2fr) minmax(140px, 1.5fr) minmax(110px, 1fr) auto; gap: 10px; align-items: end; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.users-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.users-form input[type="email"], .users-form input[type="text"], .users-form select { min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: white; font-size: 14px; color: var(--text); }
+.users-form .users-invite { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
+@media (max-width: 720px) { .users-form { grid-template-columns: 1fr; } }

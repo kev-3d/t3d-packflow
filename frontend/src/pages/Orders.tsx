@@ -4,9 +4,11 @@ import { Button } from '../components/ui/button'
 import { Eye, FileSearch, Search, Trash2 } from 'lucide-react'
 import { sortOrders, statusLabel } from '../workflow'
 import { useMemo, useState } from 'react'
+import { useCurrentUser } from '../auth'
 import type { OrderSummary } from '../types'
 
 export function Orders({ orders, onOpen, onDelete, onDeleteAll }: { orders: OrderSummary[]; onOpen: (id: number) => void; onDelete: (order: OrderSummary) => void; onDeleteAll: () => void }) {
+  const { is_admin: isAdmin } = useCurrentUser()
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState('date')
   const [status, setStatus] = useState('all')
@@ -36,14 +38,14 @@ export function Orders({ orders, onOpen, onDelete, onDeleteAll }: { orders: Orde
               <Badge className={`status-pill status-pill--${order.status}`}><i />{statusLabel(order.status)}</Badge>
               <div className="order-actions">
                 <Button variant="ghost" size="icon" className="order-action" title="View order" aria-label={`View order ${order.order_number}`} onClick={(event) => { event.stopPropagation(); onOpen(order.id) }}><Eye size={18} /></Button>
-                <Button variant="ghost" size="icon" className="order-action order-action--delete" title="Delete order" aria-label={`Delete order ${order.order_number}`} onClick={(event) => { event.stopPropagation(); onDelete(order) }}><Trash2 size={18} /></Button>
+                {isAdmin && <Button variant="ghost" size="icon" className="order-action order-action--delete" title="Delete order" aria-label={`Delete order ${order.order_number}`} onClick={(event) => { event.stopPropagation(); onDelete(order) }}><Trash2 size={18} /></Button>}
               </div>
             </div>
           ))}
           {!filtered.length && <div className="empty-row">{orders.length ? 'No matches. Try a different search or change the status filter.' : 'No orders yet. Select “New order” to get started.'}</div>}
         </div>
       </section>
-      <details className="order-maintenance"><summary>Order history management</summary><p>Deleting history removes all orders, plans and PDF reports. Product and box catalogs are kept.</p><Button className="button button--danger-ghost" disabled={!orders.length} onClick={onDeleteAll}><Trash2 size={16}/> Delete all orders</Button></details>
+      {isAdmin && <details className="order-maintenance"><summary>Order history management</summary><p>Deleting history removes all orders, plans and PDF reports. Product and box catalogs are kept.</p><Button className="button button--danger-ghost" disabled={!orders.length} onClick={onDeleteAll}><Trash2 size={16}/> Delete all orders</Button></details>}
     </div>
   )
 }
