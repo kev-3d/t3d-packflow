@@ -241,6 +241,7 @@ class RoleTests(AuthTestCase):
             ("PATCH", "/api/clients/{client_id}"), ("DELETE", "/api/clients"), ("DELETE", "/api/clients/{client_id}"),
             ("POST", "/api/client-requirements/import"), ("PATCH", "/api/client-requirements/{requirement_id}"),
             ("DELETE", "/api/client-requirements"), ("DELETE", "/api/client-requirements/{requirement_id}"),
+            ("DELETE", "/api/shipments/{shipment_id}"),
             ("GET", "/api/admin/users"), ("POST", "/api/admin/users"),
             ("PATCH", "/api/admin/users/{user_id}"), ("POST", "/api/admin/users/{user_id}/invitation"),
         }

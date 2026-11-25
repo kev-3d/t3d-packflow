@@ -1126,3 +1126,58 @@ h1[tabindex="-1"]:focus { outline: none; }
 .users-form input[type="email"], .users-form input[type="text"], .users-form select { min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: white; font-size: 14px; color: var(--text); }
 .users-form .users-invite { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
 @media (max-width: 720px) { .users-form { grid-template-columns: 1fr; } }
+
+/* Export shipments (replaces the "Export" tracking sheet) */
+.export-tools { flex-wrap: wrap; gap: 10px; }
+.export-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.export-filters label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.export-filters input[type="date"], .export-filters select { height: 34px; padding: 0 8px; border: 1px solid var(--line); background: #fff; color: var(--text); font-size: 12px; }
+.export-filters .export-pending input { accent-color: var(--cyan); }
+.export-table-wrap { overflow-x: auto; }
+.export-table { width: 100%; min-width: 1320px; border-collapse: collapse; font-size: 12px; color: var(--text); }
+.export-table thead th { position: sticky; top: 0; background: #fff; padding: 11px 8px; border-bottom: 1px solid var(--line); color: var(--muted-2); font: 600 11px/1.2 'Plus Jakarta Sans'; letter-spacing: .04em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+.export-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.export-table .export-check-col { text-align: center; }
+.export-table input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--cyan); cursor: pointer; }
+.export-date-row th { padding: 9px 10px; background: #F5F5F3; border-bottom: 1px solid var(--line); text-align: left; font: 700 12px/1 'Plus Jakarta Sans'; color: var(--text); }
+.export-date-row th span { margin-left: 10px; color: var(--muted); font-weight: 500; }
+.export-row:hover { background: rgba(8,126,151,.035); }
+.export-row--complete { background: rgba(53,122,69,.05); }
+.export-row--saving { opacity: .6; }
+.export-client { min-width: 170px; }
+.export-client b { font-weight: 600; }
+.export-client small { display: block; margin-top: 3px; color: var(--muted); }
+.export-note-toggle { margin-left: 6px; padding: 2px; border: 0; background: transparent; color: var(--brand-orange); cursor: pointer; vertical-align: middle; }
+.export-link { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: var(--cyan); cursor: pointer; font: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.export-country { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; white-space: nowrap; }
+.export-country .fi.export-flag { width: 20px; height: 20px; line-height: 20px; flex: none; border-radius: 50%; background-size: cover; box-shadow: 0 0 0 1px var(--line); }
+.export-confirm { display: inline-flex; align-items: center; gap: 2px; color: var(--red); font-size: 12px; font-weight: 600; }
+.export-confirm .export-confirm-yes { color: var(--red); }
+.export-actions .order-action--delete:hover { color: var(--red); }
+.export-inline { height: 30px; width: 100%; min-width: 80px; padding: 0 7px; border: 1px solid transparent; background: transparent; color: var(--text); font-size: 12px; }
+.export-inline:hover { border-color: var(--line); }
+.export-inline:focus { border-color: var(--cyan); background: #fff; outline: 0; }
+.export-tracking { min-width: 160px; }
+.export-tracking > * { vertical-align: middle; }
+.export-tracking input { width: calc(100% - 20px); }
+.export-tracking a { margin-left: 4px; color: var(--cyan); }
+.export-na { padding: 2px 6px; border: 1px dashed var(--line); background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+.export-na:hover { border-color: var(--cyan); color: var(--cyan); }
+.export-progress { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
+.export-progress i { width: 44px; height: 4px; background: var(--line); }
+.export-progress i b { display: block; height: 100%; background: var(--brand-orange); }
+.export-progress--done { color: var(--green); font-weight: 600; }
+.export-progress--done i b { background: var(--green); }
+.export-actions { white-space: nowrap; text-align: right; }
+.export-note-row td { padding: 10px 14px; background: #FAFAF8; }
+.shipment-form { width: min(640px, 100%); }
+.shipment-form select, .shipment-form textarea { min-height: 38px; padding: 0 10px; border: 1px solid var(--line); background: #fff; color: var(--text); font-size: 13px; }
+.shipment-form textarea { padding: 8px 10px; font: inherit; resize: vertical; }
+.shipment-form label small { display: flex; align-items: center; gap: 5px; color: var(--muted); }
+.shipment-mode { display: flex; flex-wrap: wrap; gap: 18px; padding: 16px 25px 0; font-size: 13px; }
+.shipment-mode label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.shipment-docs { margin: 0 25px 10px; padding: 12px; border: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.shipment-docs legend { padding: 0 6px; color: var(--muted); font: 600 12px/1 'Plus Jakarta Sans'; text-transform: uppercase; }
+.shipment-docs label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); }
+.shipment-hint { margin: 0 25px 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+@media (max-width: 720px) { .shipment-docs { grid-template-columns: 1fr 1fr; } .export-tools > label { width: 100%; } }

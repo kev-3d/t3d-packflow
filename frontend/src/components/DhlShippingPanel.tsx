@@ -100,6 +100,8 @@ export function DhlShippingPanel({ orderId, planId, orderCurrency, onStatus }: P
   const fuelWeek = fuelFor(config, inputs.shipment_date)
   const demand = demandFor(config, inputs.destination, inputs.shipment_date)
   const weeks = config.surcharges.fuel.weeks
+  // Fuel weeks are refreshed automatically from DHL's surcharge page; show where and when they came from.
+  const fuelOrigin = config.surcharges.fuel.source === 'DHL website' ? ` Source: DHL website, checked ${config.surcharges.fuel.imported_on ?? '—'}.` : ''
   const set = (patch: Partial<ShippingQuoteInputs>) => { setInputs({ ...inputs, ...patch }); setError('') }
   const fuelValue = inputs.fuel_source === 'manual' ? inputs.fuel_pct : fuelWeek?.pct
   const demandValue = inputs.demand_source === 'manual' ? inputs.demand_per_kg : (inputs.destination ? demand.perKg : null)
@@ -152,8 +154,8 @@ export function DhlShippingPanel({ orderId, planId, orderCurrency, onStatus }: P
             </select>
             <small className={inputs.fuel_source === 'dhl' && !fuelWeek ? 'dhl-warning' : ''}>
               {fuelWeek
-                ? `DHL International fuel, week ${fuelWeek.from} – ${fuelWeek.to}: ${fuelWeek.pct.toFixed(2)}%.`
-                : `DHL has not published a fuel rate for this date in the imported schedule (${weeks[0]?.from} – ${weeks[weeks.length - 1]?.to}).`}
+                ? `DHL International fuel, week ${fuelWeek.from} – ${fuelWeek.to}: ${fuelWeek.pct.toFixed(2)}%.${fuelOrigin}`
+                : `DHL has not published a fuel rate for this date yet (published: ${weeks[0]?.from} – ${weeks[weeks.length - 1]?.to}).${fuelOrigin}`}
             </small>
           </label>
           <label><span>Demand rate source</span>
@@ -204,7 +206,7 @@ export function DhlShippingPanel({ orderId, planId, orderCurrency, onStatus }: P
               <div className="dhl-breakdown__total"><dt>Total</dt><dd>{formatMoney(result.total, result.currency)}</dd></div>
             </dl>
             <p className="dhl-note">
-              Static snapshot {result.tariff_version}; fuel and demand from the DHL schedules imported {config.surcharges.fuel.imported_on ?? '—'} / {config.surcharges.demand.imported_on ?? '—'}. No online lookup runs during calculation. Saved {quote?.created_at.replace('T', ' ').slice(0, 16)} UTC.
+              Static snapshot {result.tariff_version}; fuel from {config.surcharges.fuel.source === 'DHL website' ? 'the DHL website, checked' : 'the DHL schedule imported'} {config.surcharges.fuel.imported_on ?? '—'}; demand from the DHL schedule imported {config.surcharges.demand.imported_on ?? '—'}. Saved {quote?.created_at.replace('T', ' ').slice(0, 16)} UTC.
             </p>
           </div>
         )}

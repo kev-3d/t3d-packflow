@@ -1,5 +1,5 @@
 import { UserButton } from '@clerk/react'
-import { Bell, Boxes, Building2, FileStack, Home, Plus, Search, Users } from 'lucide-react'
+import { Bell, Boxes, Building2, ClipboardCheck, FileStack, Home, Plus, Search, Truck, Users } from 'lucide-react'
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
@@ -19,6 +19,8 @@ interface ShellProps {
 const navigation = [
   { id: 'dashboard' as const, label: 'Overview', icon: Home },
   { id: 'orders' as const, label: 'Purchase orders', icon: FileStack },
+  { id: 'checklist' as const, label: 'Checklist', icon: ClipboardCheck },
+  { id: 'export' as const, label: 'Export', icon: Truck },
   { id: 'catalog' as const, label: 'Products and boxes', icon: Boxes },
   { id: 'clients' as const, label: 'Clients', icon: Building2 },
   { id: 'users' as const, label: 'Users', icon: Users, adminOnly: true },

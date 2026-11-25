@@ -1,3 +1,4 @@
+from datetime import date
 import asyncio
 import io
 import json
@@ -229,6 +230,21 @@ class BackendFeatureTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM products").fetchone()[0], products)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM box_types").fetchone()[0], boxes)
         self.assertEqual(delete_all_orders(), {"deleted_orders": 0})
+
+    def test_save_and_finish_adds_the_order_to_export_once(self):
+        order = self.make_order()
+        analyze_order(order["id"])
+        first = save_analysis_report(order["id"], user=None)
+        self.assertIsNotNone(first["shipment_id"])
+        with database.connect() as db:
+            row = db.execute("SELECT * FROM shipments WHERE order_id = ?", (order["id"],)).fetchone()
+        self.assertEqual(row["po"], order["order_number"])
+        self.assertEqual(row["client"], order["client"])
+        self.assertEqual(row["ship_date"], date.today().isoformat())
+        # Saving again keeps the existing Export row (and any edits made there).
+        self.assertIsNone(save_analysis_report(order["id"], user=None)["shipment_id"])
+        with database.connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM shipments WHERE order_id = ?", (order["id"],)).fetchone()[0], 1)
 
     def test_delete_single_order_cascades_and_keeps_other_orders(self):
         order = self.make_order()

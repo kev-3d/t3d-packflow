@@ -159,3 +159,39 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TEXT NOT NULL,
     last_login_at TEXT
 );
+
+-- Outgoing shipments (the "Export" tracking sheet): one row per shipment, linked to an order
+-- or entered by hand (Shopify, trade shows, samples). Document checks are 1 (done), 0 (to do)
+-- or NULL (not applicable to this destination).
+CREATE TABLE IF NOT EXISTS shipments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ship_date TEXT NOT NULL,
+    order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+    client TEXT NOT NULL,
+    po TEXT NOT NULL DEFAULT '',
+    destination TEXT NOT NULL DEFAULT '',
+    invoice_number TEXT NOT NULL DEFAULT '',
+    tracking_number TEXT NOT NULL DEFAULT '',
+    forwarder TEXT NOT NULL DEFAULT '',
+    doc_pl INTEGER,
+    doc_sds INTEGER,
+    doc_stripe INTEGER,
+    doc_tsca INTEGER,
+    doc_sec232 INTEGER,
+    doc_coo INTEGER,
+    email_client_sent INTEGER NOT NULL DEFAULT 0,
+    email_client_sent_at TEXT,
+    email_forwarder_sent INTEGER NOT NULL DEFAULT 0,
+    email_forwarder_sent_at TEXT,
+    notes TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT '',
+    -- Shipment checklist (warehouse): to_pack -> packed -> picked_up; slot morning | afternoon.
+    pack_status TEXT NOT NULL DEFAULT 'to_pack' CHECK (pack_status IN ('to_pack', 'packed', 'picked_up')),
+    pickup_date TEXT,
+    pickup_slot TEXT CHECK (pickup_slot IS NULL OR pickup_slot IN ('morning', 'afternoon')),
+    picked_up_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS shipments_ship_date_idx ON shipments (ship_date);
+CREATE INDEX IF NOT EXISTS shipments_order_id_idx ON shipments (order_id);

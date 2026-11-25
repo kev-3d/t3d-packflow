@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import dataclasses
+import os
 import json
 import hashlib
 import logging
@@ -31,7 +33,7 @@ from .database import (
 )
 from .destinations import detect_destination
 from .geo import with_country_code
-from .dhl_surcharges import REGION_LABELS, load_surcharges
+from .dhl_surcharges import REGION_LABELS, ensure_fuel_for, load_surcharges, refresh_fuel_from_web
 from .extraction import (
     capacity_family_for, extract_email, extract_pdf, parse_catalog_excel, parse_clients_excel,
     parse_reference_workbook,
@@ -40,12 +42,14 @@ from .packing import DEFAULT_OBJECTIVE as DEFAULT_PACKING_OBJECTIVE
 from .packing import OBJECTIVES as PACKING_OBJECTIVES
 from .packing import PackingSettings, fill_existing_plan, pack_order
 from .requirements_routes import requirements_note_for, router as requirements_router
+from .checklist_routes import router as checklist_router
+from .shipments_routes import ensure_order_shipment, router as shipments_router
 from .labels import render_box_labels_pdf
 from .reports import render_analysis_pdf
 from .shipping_docs import DEFAULT_EXPORTER, build_shipment, render_packing_list_pdf
 from . import tsca
 from .naming import normalize_product_name
-from .auth import bootstrap_admins, configuration_problems, current_user, require_admin
+from .auth import User, bootstrap_admins, configuration_problems, current_user, require_admin
 from .auth_routes import router as auth_router
 from .env import PROJECT_ENV, PROJECT_ENV_LOCAL, load_env
 from .slack_notify import notify_plan_ready
@@ -564,7 +568,20 @@ async def lifespan(_: FastAPI):
     init_db()
     bootstrap_admins()
     _ensure_demo_plans()
+    fuel_refresh = asyncio.create_task(_refresh_dhl_fuel_daily()) if os.getenv("DHL_FUEL_AUTO_REFRESH", "1") != "0" else None
     yield
+    if fuel_refresh:
+        fuel_refresh.cancel()
+
+
+DHL_FUEL_REFRESH_SECONDS = 24 * 3600
+
+
+async def _refresh_dhl_fuel_daily() -> None:
+    """Keep DHL's weekly fuel surcharge current without manual imports: fetch on start-up, then daily."""
+    while True:
+        await asyncio.to_thread(refresh_fuel_from_web)
+        await asyncio.sleep(DHL_FUEL_REFRESH_SECONDS)
 
 
 app = FastAPI(
@@ -583,6 +600,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(requirements_router)
+app.include_router(shipments_router)
+app.include_router(checklist_router)
 app.include_router(auth_router)
 
 
@@ -1081,10 +1100,16 @@ def _save_analysis_report(order_id: int) -> dict[str, Any]:
 
 
 @app.post("/api/orders/{order_id}/reports", status_code=201)
-def save_analysis_report(order_id: int) -> dict[str, Any]:
-    """Save & Finish: store the final PDF and tell the packing team on Slack."""
+def save_analysis_report(order_id: int, user: User | None = Depends(current_user)) -> dict[str, Any]:
+    """Save & Finish: store the final PDF, add the order to the Export list and tell the packing team on Slack."""
     report = _save_analysis_report(order_id)
-    return {**report, "slack_notification": notify_plan_ready(get_order(order_id))}
+    shipment_id = None
+    try:
+        with connect() as db:
+            shipment_id = ensure_order_shipment(db, order_id, user.email if isinstance(user, User) else "")
+    except Exception:  # The plan is already saved; a failed Export row must not undo Save & Finish.
+        logger.exception("Could not add order %s to the Export list", order_id)
+    return {**report, "shipment_id": shipment_id, "slack_notification": notify_plan_ready(get_order(order_id))}
 
 
 @app.get("/api/orders/{order_id}/reports")
@@ -1484,6 +1509,7 @@ def _detect_order_destination(db: Database, order_id: int) -> dict[str, Any] | N
 
 @app.get("/api/shipping/dhl")
 def get_dhl_config() -> dict[str, Any]:
+    ensure_fuel_for(date.today())
     tariff = dhl_pricing.load_tariff()
     surcharges = load_surcharges()
     regions = surcharges["demand"]["regions"]
@@ -1520,6 +1546,11 @@ def get_order_shipping_quote(order_id: int) -> dict[str, Any]:
 @app.post("/api/orders/{order_id}/shipping-quote")
 def create_order_shipping_quote(order_id: int, payload: ShippingQuotePayload) -> dict[str, Any]:
     inputs = payload.model_dump()
+    if inputs.get("fuel_source") != "manual":
+        try:
+            ensure_fuel_for(date.fromisoformat(str(inputs.get("shipment_date") or "")))
+        except ValueError:
+            pass  # An invalid date is reported by the pricing step below.
     with connect() as db:
         if not db.execute("SELECT 1 FROM orders WHERE id = ?", (order_id,)).fetchone():
             raise HTTPException(404, "Order not found.")

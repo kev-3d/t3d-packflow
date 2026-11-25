@@ -1,5 +1,6 @@
 import type { RecommendationPreview } from './workflow'
-import type { AnalysisReport, AppUser, AuthConfig, BoxType, Client, ClientImportResult, ClientInput, ClientRequirement, ClientRequirementInput, ClientRequirementsImportResult, CurrentUser, DashboardData, DhlConfig, NewUserInput, NewUserResult, OrderDetailData, OrderSummary, Product, ShippingQuoteInputs, ShippingQuoteResponse, TscaDraft, TscaState, UserUpdate } from './types'
+import type { ApiChecklistPackage, ApiPickupSlot } from './checklist/model'
+import type { AnalysisReport, AppUser, AuthConfig, BoxType, Client, ClientImportResult, ClientInput, ClientRequirement, ClientRequirementInput, ClientRequirementsImportResult, CurrentUser, DashboardData, DhlConfig, NewUserInput, NewUserResult, OrderDetailData, OrderSummary, Product, ShippingQuoteInputs, ShippingQuoteResponse, Shipment, ShipmentFilters, ShipmentInput, ShipmentOrderCandidate, ShipmentOrderDefaults, ShipmentUpdate, TscaDraft, TscaState, UserUpdate } from './types'
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number, public readonly details: unknown) { super(message); this.name = 'ApiError' }
@@ -230,4 +231,21 @@ export const api = {
   shippingQuote: (orderId: number) => request<ShippingQuoteResponse>(`/orders/${orderId}/shipping-quote`),
   saveShippingQuote: (orderId: number, payload: ShippingQuoteInputs) =>
     request<ShippingQuoteResponse>(`/orders/${orderId}/shipping-quote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  shipments: (filters: ShipmentFilters = {}) => {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(filters)) if (value) params.set(key, String(value))
+    const query = params.toString()
+    return request<Shipment[]>(`/shipments${query ? `?${query}` : ''}`)
+  },
+  shipmentOrderCandidates: () => request<ShipmentOrderCandidate[]>('/shipments/order-candidates'),
+  shipmentOrderDefaults: (orderId: number) => request<ShipmentOrderDefaults>(`/shipments/order-defaults/${orderId}`),
+  createShipment: (payload: ShipmentInput) => request<Shipment>('/shipments', jsonBody('POST', payload)),
+  updateShipment: (id: number, payload: ShipmentUpdate) => request<Shipment>(`/shipments/${id}`, jsonBody('PATCH', payload)),
+  deleteShipment: (id: number) => request<{ deleted_shipment_id: number }>(`/shipments/${id}`, { method: 'DELETE' }),
+  checklist: () => request<ApiChecklistPackage[]>('/checklist'),
+  checklistAction: (id: number, payload: ChecklistActionInput) => request<ApiChecklistPackage>(`/checklist/${id}`, jsonBody('PATCH', payload)),
 }
+
+export type ChecklistActionInput =
+  | { action: 'pack' | 'unpack' | 'pick_up' | 'undo_pick_up' }
+  | { action: 'assign_pickup'; pickup_date: string; pickup_slot: ApiPickupSlot | null }

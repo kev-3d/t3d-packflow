@@ -119,8 +119,8 @@ def resolve_rates(inputs: dict[str, Any], surcharges: dict[str, Any], day: date,
         if week is None:
             weeks = surcharges["fuel"]["weeks"]
             raise PricingError(
-                f"DHL has not published a fuel surcharge covering {day.isoformat()} in the imported schedule "
-                f"({weeks[0]['from']} to {weeks[-1]['to']}). Import the latest DHL fuel PDF or use a manual override."
+                f"DHL has not published a fuel surcharge covering {day.isoformat()} yet "
+                f"(published weeks: {weeks[0]['from']} to {weeks[-1]['to']}). Use a manual override."
             )
         resolved.update(fuel_pct=float(week["pct"]), fuel_note=f"DHL week {week['from']} to {week['to']}")
     resolved["fuel_source"] = fuel_source

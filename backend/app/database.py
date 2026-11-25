@@ -138,6 +138,16 @@ def _migrate_schema(db: Database) -> None:
     _ensure_column(db, "products", "ean", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(db, "products", "tsca_name", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(db, "products", "tsca_description", "TEXT NOT NULL DEFAULT ''")
+    # Shipment checklist (mirrors schema/postgres/005_shipment_checklist.sql).
+    if "pack_status" not in {row["name"] for row in db.execute("PRAGMA table_info(shipments)")}:
+        _ensure_column(db, "shipments", "pack_status", "TEXT NOT NULL DEFAULT 'to_pack'")
+        _ensure_column(db, "shipments", "pickup_date", "TEXT")
+        _ensure_column(db, "shipments", "pickup_slot", "TEXT")
+        _ensure_column(db, "shipments", "picked_up_at", "TEXT")
+        # Shipments dated before this feature existed already left the warehouse.
+        db.execute("UPDATE shipments SET pack_status = 'picked_up', picked_up_at = ship_date "
+                   "WHERE ship_date < date('now', 'localtime')")
+    db.execute("CREATE INDEX IF NOT EXISTS shipments_pack_status_idx ON shipments (pack_status)")
 
 
 def _apply_reference_packing_data(db: Database) -> None:

@@ -1,4 +1,4 @@
-export type Page = 'dashboard' | 'orders' | 'catalog' | 'clients' | 'users' | 'order'
+export type Page = 'dashboard' | 'orders' | 'checklist' | 'export' | 'catalog' | 'clients' | 'users' | 'order'
 
 export type Role = 'admin' | 'user'
 
@@ -410,3 +410,63 @@ export interface TscaState {
   draft: TscaDraft
   issues: string[]
 }
+
+export type ShipmentDocField = 'doc_pl' | 'doc_sds' | 'doc_stripe' | 'doc_tsca' | 'doc_sec232' | 'doc_coo'
+export type ShipmentEmailField = 'email_client_sent' | 'email_forwarder_sent'
+
+/** One outgoing shipment (a row of the Export tracking sheet). Document checks: null = not applicable. */
+export interface Shipment {
+  id: number
+  ship_date: string
+  order_id: number | null
+  order_number: string | null
+  client: string
+  po: string
+  destination: string
+  invoice_number: string
+  tracking_number: string
+  forwarder: string
+  doc_pl: boolean | null
+  doc_sds: boolean | null
+  doc_stripe: boolean | null
+  doc_tsca: boolean | null
+  doc_sec232: boolean | null
+  doc_coo: boolean | null
+  email_client_sent: boolean
+  email_client_sent_at: string | null
+  email_forwarder_sent: boolean
+  email_forwarder_sent_at: string | null
+  notes: string
+  created_by: string
+  created_at: string
+  updated_at: string
+  progress: { done: number; total: number }
+  complete: boolean
+  requirements: OrderRequirementsNote | null
+}
+
+export interface ShipmentInput {
+  ship_date: string
+  order_id?: number | null
+  client?: string
+  po?: string
+  destination?: string
+  invoice_number?: string
+  tracking_number?: string
+  forwarder?: string
+  notes?: string
+}
+
+export type ShipmentUpdate = Partial<Omit<ShipmentInput, 'order_id'>> & Partial<Record<ShipmentDocField, boolean | null>> & Partial<Record<ShipmentEmailField, boolean>>
+
+export interface ShipmentOrderCandidate { id: number; order_number: string; client: string; order_date: string | null; status: string }
+
+export interface ShipmentOrderDefaults {
+  order_id: number
+  client: string
+  po: string
+  destination: string
+  forwarder: string
+}
+
+export interface ShipmentFilters { from?: string; to?: string; q?: string; forwarder?: string; destination?: string; pending?: boolean }
