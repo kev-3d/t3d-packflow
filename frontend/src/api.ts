@@ -1,12 +1,33 @@
 import type { RecommendationPreview } from './workflow'
-import type { AnalysisReport, BoxType, Client, ClientImportResult, ClientInput, ClientRequirement, ClientRequirementInput, ClientRequirementsImportResult, DashboardData, DhlConfig, OrderDetailData, OrderSummary, Product, ShippingQuoteInputs, ShippingQuoteResponse } from './types'
+import type { ApiChecklistPackage, ApiPickupSlot } from './checklist/model'
+import type { AnalysisReport, AppUser, AuthConfig, BoxType, Client, ClientImportResult, ClientInput, ClientRequirement, ClientRequirementInput, ClientRequirementsImportResult, CurrentUser, DashboardData, DhlConfig, NewUserInput, NewUserResult, OrderDetailData, OrderSummary, Product, ShippingQuoteInputs, ShippingQuoteResponse, Shipment, ShipmentFilters, ShipmentInput, ShipmentOrderCandidate, ShipmentOrderDefaults, ShipmentUpdate, TscaDraft, TscaState, UserUpdate } from './types'
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number, public readonly details: unknown) { super(message); this.name = 'ApiError' }
 }
 
+// The signed-in session (Clerk) provides a short-lived token for every API call.
+type TokenProvider = () => Promise<string | null>
+let tokenProvider: TokenProvider | null = null
+let unauthorizedHandler: (() => void) | null = null
+
+export function configureAuth(provider: TokenProvider | null, onUnauthorized: (() => void) | null) {
+  tokenProvider = provider
+  unauthorizedHandler = onUnauthorized
+}
+
+/** fetch() with the session token; a 401 means the session ended, so sign out. */
+async function authFetch(url: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers)
+  const token = tokenProvider ? await tokenProvider() : null
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const response = await fetch(url, { ...init, headers })
+  if (response.status === 401) unauthorizedHandler?.()
+  return response
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, options)
+  const response = await authFetch(`/api${path}`, options)
   if (!response.ok) {
     const payload = await response.json().catch(() => ({ detail: 'The request could not be completed.' }))
     throw new ApiError(typeof payload.detail === 'string' ? payload.detail : 'Some fields need attention. Review the highlighted values.', response.status, payload.detail)
@@ -18,7 +39,7 @@ const safeName = (orderNumber: string, id: number) => orderNumber.replace(/[^a-z
 
 /** Fetch a generated PDF and hand it to the browser as a download. */
 async function downloadPdf(url: string, filename: string, fallbackError: string) {
-  const response = await fetch(url)
+  const response = await authFetch(url)
   if (!response.ok) {
     const payload = await response.json().catch(() => ({ detail: fallbackError }))
     throw new Error(payload.detail || fallbackError)
@@ -34,7 +55,21 @@ async function downloadPdf(url: string, filename: string, fallbackError: string)
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
 }
 
+const jsonBody = (method: string, payload: object): RequestInit =>
+  ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+
 export const api = {
+  /** Public: needed before anyone signs in, so it never sends a token. */
+  authConfig: async (): Promise<AuthConfig> => {
+    const response = await fetch('/api/auth/config')
+    if (!response.ok) throw new ApiError('The server is not available.', response.status, null)
+    return response.json() as Promise<AuthConfig>
+  },
+  me: () => request<CurrentUser>('/auth/me'),
+  users: () => request<AppUser[]>('/admin/users'),
+  createUser: (payload: NewUserInput) => request<NewUserResult>('/admin/users', jsonBody('POST', payload)),
+  updateUser: (id: number, payload: UserUpdate) => request<AppUser>(`/admin/users/${id}`, jsonBody('PATCH', payload)),
+  resendInvitation: (id: number) => request<Pick<NewUserResult, 'invitation' | 'invitation_error'>>(`/admin/users/${id}/invitation`, { method: 'POST' }),
   dashboard: () => request<DashboardData>('/dashboard'),
   orders: () => request<OrderSummary[]>('/orders'),
   order: (id: number) => request<OrderDetailData>(`/orders/${id}`),
@@ -63,8 +98,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
-  analyzeOrder: (id: number, objective?: string) =>
-    request(`/orders/${id}/analyze${objective ? `?objective=${encodeURIComponent(objective)}` : ''}`, { method: 'POST' }),
+  analyzeOrder: (id: number, objective?: string, allowanceCm?: number) => {
+    const query = new URLSearchParams()
+    if (objective) query.set('objective', objective)
+    if (allowanceCm !== undefined) query.set('allowance_cm', String(allowanceCm))
+    const suffix = query.toString() ? `?${query}` : ''
+    return request(`/orders/${id}/analyze${suffix}`, { method: 'POST' })
+  },
   addSuggestedItem: (orderId: number, sourceItemId: number, quantity: number, expectedPlanId?: number) =>
     request<OrderDetailData>(`/orders/${orderId}/suggested-items`, {
       method: 'POST',
@@ -74,7 +114,7 @@ export const api = {
   removeSuggestedItem: (orderId: number, itemId: number, quantity?: number) =>
     request<OrderDetailData>(`/orders/${orderId}/suggested-items/${itemId}${quantity ? `?quantity=${quantity}` : ''}`, { method: 'DELETE' }),
   exportOrder: async (id: number, orderNumber: string) => {
-    const response = await fetch(`/api/orders/${id}/export`)
+    const response = await authFetch(`/api/orders/${id}/export`)
     if (!response.ok) throw new Error('The plan could not be exported.')
     const url = URL.createObjectURL(await response.blob())
     const anchor = document.createElement('a')
@@ -84,7 +124,7 @@ export const api = {
     URL.revokeObjectURL(url)
   },
   exportOrderPdf: async (id: number, orderNumber: string) => {
-    const response = await fetch(`/api/orders/${id}/export.pdf`)
+    const response = await authFetch(`/api/orders/${id}/export.pdf`)
     if (!response.ok) {
       const payload = await response.json().catch(() => ({ detail: 'The PDF could not be exported.' }))
       throw new Error(payload.detail || 'The PDF could not be exported.')
@@ -106,8 +146,28 @@ export const api = {
   boxLabelsPdf: (id: number, orderNumber: string, box?: number) =>
     downloadPdf(`/api/orders/${id}/labels.pdf${box ? `?box=${box}` : ''}`,
       `labels-${safeName(orderNumber, id)}${box ? `-box${box}` : ''}.pdf`, 'The box labels could not be generated.'),
+  tsca: (id: number) => request<TscaState>(`/orders/${id}/tsca`),
+  saveTsca: (id: number, draft: TscaDraft, confirmed: boolean, rememberProductIds: number[] = []) =>
+    request<TscaState>(`/orders/${id}/tsca`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draft, confirmed, remember_product_ids: rememberProductIds }),
+    }),
+  tscaPreview: async (id: number, draft: TscaDraft, confirmed: boolean, signal?: AbortSignal) => {
+    const response = await authFetch(`/api/orders/${id}/tsca/preview.pdf`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draft, confirmed }), signal,
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ detail: 'The preview could not be generated.' }))
+      throw new Error(typeof payload.detail === 'string' ? payload.detail : 'Some fields need attention before the preview can be shown.')
+    }
+    return response.blob()
+  },
+  tscaPdf: (id: number, orderNumber: string, final: boolean) =>
+    downloadPdf(`/api/orders/${id}/tsca.pdf?final=${final ? 1 : 0}`,
+      `TSCA_Certification_${safeName(orderNumber, id)}${final ? '' : '_DRAFT'}.pdf`, 'The TSCA certification could not be generated.'),
   sourcePdf: async (id: number) => {
-    const response = await fetch(`/api/orders/${id}/source.pdf`)
+    const response = await authFetch(`/api/orders/${id}/source.pdf`)
     if (!response.ok) throw new Error(response.status === 404 ? 'The original PDF is unavailable. Only PDFs uploaded after source retention was enabled can be viewed.' : 'The source PDF could not be opened. Try again.')
     return response.blob()
   },
@@ -171,4 +231,21 @@ export const api = {
   shippingQuote: (orderId: number) => request<ShippingQuoteResponse>(`/orders/${orderId}/shipping-quote`),
   saveShippingQuote: (orderId: number, payload: ShippingQuoteInputs) =>
     request<ShippingQuoteResponse>(`/orders/${orderId}/shipping-quote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  shipments: (filters: ShipmentFilters = {}) => {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(filters)) if (value) params.set(key, String(value))
+    const query = params.toString()
+    return request<Shipment[]>(`/shipments${query ? `?${query}` : ''}`)
+  },
+  shipmentOrderCandidates: () => request<ShipmentOrderCandidate[]>('/shipments/order-candidates'),
+  shipmentOrderDefaults: (orderId: number) => request<ShipmentOrderDefaults>(`/shipments/order-defaults/${orderId}`),
+  createShipment: (payload: ShipmentInput) => request<Shipment>('/shipments', jsonBody('POST', payload)),
+  updateShipment: (id: number, payload: ShipmentUpdate) => request<Shipment>(`/shipments/${id}`, jsonBody('PATCH', payload)),
+  deleteShipment: (id: number) => request<{ deleted_shipment_id: number }>(`/shipments/${id}`, { method: 'DELETE' }),
+  checklist: () => request<ApiChecklistPackage[]>('/checklist'),
+  checklistAction: (id: number, payload: ChecklistActionInput) => request<ApiChecklistPackage>(`/checklist/${id}`, jsonBody('PATCH', payload)),
 }
+
+export type ChecklistActionInput =
+  | { action: 'pack' | 'unpack' | 'pick_up' | 'undo_pick_up' }
+  | { action: 'assign_pickup'; pickup_date: string; pickup_slot: ApiPickupSlot | null }

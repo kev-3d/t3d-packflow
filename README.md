@@ -6,6 +6,7 @@ PackFlow turns purchase orders received as PDFs, emails, calls or messages into 
 
 - React 19, TypeScript and Vite.
 - FastAPI and Python 3.12.
+- Clerk for sign-in; roles (`admin` / `user`) stored in the app database.
 - SQLite, with no external database service.
 - `pypdf` for text-based PDFs and ReportLab for PDF reports.
 - `openpyxl` for Excel catalogs.
@@ -33,6 +34,46 @@ npm run dev
 ```
 
 Open `http://127.0.0.1:5173`. Vite proxies `/api` requests to port `8001`.
+
+## Authentication and roles
+
+Sign-in is handled by [Clerk](https://clerk.com) (Google or email + password, password resets,
+invitations). The API verifies Clerk's session token on every request and takes the role from
+its own `users` table, so a token never grants a role by itself. Without Clerk keys every API
+call except `/api/health` answers 503 and the app shows "Sign-in is not configured".
+
+| Role | Can |
+|---|---|
+| `user` | Work with orders: upload, review, analyze, save reports, PDFs, labels, DHL quotes. View catalog and clients. |
+| `admin` | Everything, plus delete orders, edit/import/delete catalog, clients and special requirements, exporter settings and the **Users** page. |
+
+### Setup
+
+1. Create a Clerk application and keep its **Development** instance for dev/test. Enable the
+   sign-in methods you want (Google, email + password).
+2. Set the variables in `.env` (local) or in the hosting dashboard (never in the repository):
+
+   | Variable | Purpose |
+   |---|---|
+   | `CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` | API keys from the Clerk dashboard. |
+   | `CLERK_AUTHORIZED_PARTIES` | Origins allowed to use the tokens, e.g. `http://localhost:5173,https://packflow-dev.example.com`. |
+   | `AUTH_ALLOWED_EMAIL_DOMAINS` | Domains that get access automatically (role `user`) on first sign-in with a verified email. Others need an invitation. |
+   | `AUTH_BOOTSTRAP_ADMINS` | Emails created as admins at startup when missing. Use this on hosts without a shell. |
+   | `AUTH_APP_URL` | Where Clerk invitation links send people (the app URL). |
+
+3. Create the first administrators, either with `AUTH_BOOTSTRAP_ADMINS` or with the script
+   (it also sends a Clerk invitation; idempotent):
+
+   ```bash
+   cd backend
+   venv/Scripts/python -m scripts.create_admin admin@company.com --name "Full Name"
+   ```
+
+4. Admins add, invite, promote and disable people from the **Users** page. An admin cannot
+   remove their own access, and there is always at least one active admin.
+
+Tests for authentication and the permission matrix are in `backend/tests/test_auth.py`
+(`pip install -r requirements-dev.txt` adds `httpx` for FastAPI's test client).
 
 ## Excel catalogs
 

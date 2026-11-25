@@ -1,6 +1,6 @@
 {
   "source": "Volume - weight calculator.xlsx, sheets boxes bottles volumes and box types-what fits; excludes orders, prices and customer data.",
-  "limitations": "Product dimensions follow the existing prototype importer, including provisional 10 x 10 x 10 cm sizes where no dimensions were provided; imported boxes use the existing provisional 25 kg capacity.",
+  "limitations": "Product dimensions follow the existing prototype importer, including provisional 10 x 10 x 10 cm sizes where no dimensions were provided. Box capacities come from the box types-what fits sheet (lower value where two are given, e.g. 67 of 67 / 75); text entries such as 8x50 (400) are not imported. Imported boxes use a 20 kg maximum, as the DHL calculator reference app.",
   "products": [
     {
       "name": "Sachet filled - NEW",
@@ -10,7 +10,8 @@
       "weight_kg": 0.0022,
       "sku": "PRODUCT-E9FC50548F",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": ""
     },
     {
       "name": "Sachet packed",
@@ -20,7 +21,8 @@
       "weight_kg": 0.003,
       "sku": "PRODUCT-26EA7844A8",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": ""
     },
     {
       "name": "10 ml",
@@ -30,7 +32,8 @@
       "weight_kg": 0.0245,
       "sku": "PRODUCT-0EEA5861A5",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": "10ml"
     },
     {
       "name": "50 ml",
@@ -40,7 +43,8 @@
       "weight_kg": 0.085,
       "sku": "PRODUCT-0C10EF69EB",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": "50ml"
     },
     {
       "name": "50 ml no box no instructions",
@@ -50,7 +54,8 @@
       "weight_kg": 0.08,
       "sku": "PRODUCT-644D971311",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": "50ml"
     },
     {
       "name": "120 ml",
@@ -60,7 +65,8 @@
       "weight_kg": 0.175,
       "sku": "PRODUCT-D597DDFFDD",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": "120ml"
     },
     {
       "name": "glide bottle 250ml (6x20cm)",
@@ -70,7 +76,8 @@
       "weight_kg": 0.3,
       "sku": "PRODUCT-557F350BE5",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": "glide_250ml"
     },
     {
       "name": "ProKit",
@@ -80,7 +87,8 @@
       "weight_kg": 0.43,
       "sku": "PRODUCT-C8C86E5B24",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": "prokits"
     },
     {
       "name": "Glide kit",
@@ -90,7 +98,8 @@
       "weight_kg": 0.63,
       "sku": "PRODUCT-212A7B4076",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": "glide_kit"
     },
     {
       "name": "Glide roller",
@@ -100,7 +109,8 @@
       "weight_kg": 0.22,
       "sku": "PRODUCT-E5640C99CB",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": ""
     },
     {
       "name": "Drywise dryer",
@@ -110,7 +120,8 @@
       "weight_kg": 15.0,
       "sku": "PRODUCT-F41C46D84A",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": ""
     },
     {
       "name": "Desiccant",
@@ -120,7 +131,8 @@
       "weight_kg": 0.95,
       "sku": "PRODUCT-0E43A4B454",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": ""
     },
     {
       "name": "autoloader add-on",
@@ -130,7 +142,8 @@
       "weight_kg": 0.865,
       "sku": "PRODUCT-BE51EE6C18",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": ""
     },
     {
       "name": "PCB",
@@ -140,7 +153,8 @@
       "weight_kg": 0.172,
       "sku": "PRODUCT-DFBB42906D",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": ""
     },
     {
       "name": "RH sensors",
@@ -150,7 +164,8 @@
       "weight_kg": 0.1275,
       "sku": "PRODUCT-777224F3F5",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": ""
     },
     {
       "name": "Pump (14x14x7 cm)",
@@ -160,7 +175,8 @@
       "weight_kg": 1.0,
       "sku": "PRODUCT-3B9946E984",
       "rotation_allowed": 1,
-      "fragile": 0
+      "fragile": 0,
+      "capacity_family": ""
     }
   ],
   "boxes": [
@@ -171,7 +187,15 @@
       "width_cm": 20.0,
       "height_cm": 10.0,
       "empty_weight_kg": 0.11,
-      "max_weight_kg": 25.0
+      "max_weight_kg": 20.0,
+      "capacities": {
+        "50ml": 14,
+        "120ml": 12,
+        "10ml": 81,
+        "250ml": 6,
+        "prokits": 2,
+        "glide_250ml": 12
+      }
     },
     {
       "code": "25",
@@ -180,7 +204,13 @@
       "width_cm": 20.0,
       "height_cm": 20.0,
       "empty_weight_kg": 0.12,
-      "max_weight_kg": 25.0
+      "max_weight_kg": 20.0,
+      "capacities": {
+        "50ml": 25,
+        "120ml": 25,
+        "10ml": 147,
+        "250ml": 9
+      }
     },
     {
       "code": "50-FINISHED",
@@ -189,7 +219,14 @@
       "width_cm": 20.0,
       "height_cm": 20.0,
       "empty_weight_kg": 0.28,
-      "max_weight_kg": 25.0
+      "max_weight_kg": 20.0,
+      "capacities": {
+        "50ml": 55,
+        "120ml": 36,
+        "10ml": 270,
+        "250ml": 15,
+        "prokits": 6
+      }
     },
     {
       "code": "50-NEW",
@@ -198,7 +235,10 @@
       "width_cm": 25.0,
       "height_cm": 16.0,
       "empty_weight_kg": 0.285,
-      "max_weight_kg": 25.0
+      "max_weight_kg": 20.0,
+      "capacities": {
+        "50ml": 52
+      }
     },
     {
       "code": "60-SINGLE-COATER",
@@ -207,7 +247,13 @@
       "width_cm": 35.0,
       "height_cm": 14.0,
       "empty_weight_kg": 0.45,
-      "max_weight_kg": 25.0
+      "max_weight_kg": 20.0,
+      "capacities": {
+        "50ml": 60,
+        "250ml": 25,
+        "prokits": 6,
+        "glide_250ml": 24
+      }
     },
     {
       "code": "100",
@@ -216,7 +262,13 @@
       "width_cm": 20.0,
       "height_cm": 42.0,
       "empty_weight_kg": 0.472,
-      "max_weight_kg": 25.0
+      "max_weight_kg": 20.0,
+      "capacities": {
+        "50ml": 110,
+        "120ml": 81,
+        "250ml": 45,
+        "prokits": 13
+      }
     },
     {
       "code": "200-NEW",
@@ -225,7 +277,11 @@
       "width_cm": 40.0,
       "height_cm": 40.0,
       "empty_weight_kg": 0.74,
-      "max_weight_kg": 25.0
+      "max_weight_kg": 20.0,
+      "capacities": {
+        "50ml": 200,
+        "120ml": 162
+      }
     },
     {
       "code": "PROKITS-X10",
@@ -234,7 +290,14 @@
       "width_cm": 28.0,
       "height_cm": 24.0,
       "empty_weight_kg": 0.43,
-      "max_weight_kg": 25.0
+      "max_weight_kg": 20.0,
+      "capacities": {
+        "50ml": 67,
+        "120ml": 48,
+        "250ml": 16,
+        "prokits": 10,
+        "glide_250ml": 40
+      }
     },
     {
       "code": "COATERS-X5",
@@ -243,7 +306,11 @@
       "width_cm": 39.0,
       "height_cm": 36.0,
       "empty_weight_kg": 0.98,
-      "max_weight_kg": 25.0
+      "max_weight_kg": 20.0,
+      "capacities": {
+        "50ml": 340,
+        "prokits": 44
+      }
     },
     {
       "code": "GLIDE-KITS-X4",
@@ -252,7 +319,11 @@
       "width_cm": 25.0,
       "height_cm": 15.0,
       "empty_weight_kg": 0.26,
-      "max_weight_kg": 25.0
+      "max_weight_kg": 20.0,
+      "capacities": {
+        "50ml": 40,
+        "glide_kit": 4
+      }
     },
     {
       "code": "GLIDE-KITS-X5",
@@ -261,7 +332,11 @@
       "width_cm": 25.5,
       "height_cm": 15.0,
       "empty_weight_kg": 0.2,
-      "max_weight_kg": 25.0
+      "max_weight_kg": 20.0,
+      "capacities": {
+        "50ml": 60,
+        "glide_kit": 5
+      }
     },
     {
       "code": "GLIDE-KITS-X10",
@@ -270,7 +345,10 @@
       "width_cm": 40.0,
       "height_cm": 15.0,
       "empty_weight_kg": 0.38,
-      "max_weight_kg": 25.0
+      "max_weight_kg": 20.0,
+      "capacities": {
+        "glide_kit": 11
+      }
     },
     {
       "code": "GLIDE-KITS-X12",
@@ -279,7 +357,10 @@
       "width_cm": 30.0,
       "height_cm": 25.0,
       "empty_weight_kg": 0.3,
-      "max_weight_kg": 25.0
+      "max_weight_kg": 20.0,
+      "capacities": {
+        "glide_kit": 12
+      }
     }
   ]
 }

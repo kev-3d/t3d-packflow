@@ -1,14 +1,15 @@
 import { Badge } from '../components/ui/badge'
 import { useEffect, useState } from 'react'
-import { ArrowRight, Box, Check, ChevronRight, ClipboardList, Package, Scale, Sparkles, TriangleAlert } from 'lucide-react'
+import { ArrowRight, Box, ChevronRight, ClipboardList, Package, Scale } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { api } from '../api'
-import { statusLabel, prioritySuggestions } from '../workflow'
+import { statusLabel } from '../workflow'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button'
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '../components/ui/chart'
 import { Gauge } from '../components/charts/gauge'
 import { PackingPreview } from '../components/PackingPreview'
+import { ChecklistOverviewCard } from '../components/checklist/ChecklistOverviewCard'
 import type { DashboardData, OrderDetailData } from '../types'
 
 interface DashboardProps {
@@ -16,9 +17,10 @@ interface DashboardProps {
   onOpenOrder: (id: number) => void
   onUpload: () => void
   onViewOrders: () => void
+  onOpenChecklist: () => void
 }
 
-export function Dashboard({ data, onOpenOrder, onUpload, onViewOrders }: DashboardProps) {
+export function Dashboard({ data, onOpenOrder, onUpload, onViewOrders, onOpenChecklist }: DashboardProps) {
   const latest = data.orders.find(order => (order.box_count ?? 0) > 0)
   const [detail, setDetail] = useState<OrderDetailData | null>(null)
   const [previewError, setPreviewError] = useState(false)
@@ -30,8 +32,6 @@ export function Dashboard({ data, onOpenOrder, onUpload, onViewOrders }: Dashboa
   }, [latest?.id, data])
   const plan = detail?.plan?.result
   const series = data.utilization_series.filter(point => data.orders.some(order => order.order_number === point.label && (order.box_count ?? 0) > 0)).slice(-7)
-  const pending = data.orders.filter(order => order.status !== 'packed')
-  const suggestions = plan ? prioritySuggestions(plan.suggestions).slice(0,3) : []
   const metrics = [
     { label: 'Average utilization', value: `${data.kpis.average_utilization}%`, caption: 'Latest plan per order', icon: Package },
     { label: 'Orders on record', value: data.kpis.orders, caption: `${data.kpis.ready} packing plans ready`, icon: ClipboardList },
@@ -69,11 +69,7 @@ export function Dashboard({ data, onOpenOrder, onUpload, onViewOrders }: Dashboa
       <Card className="latest-plan-card"><CardHeader><CardTitle>Last packing plan {latest && <span>· {latest.order_number}</span>}</CardTitle><p>{plan ? `${plan.box_count} ${plan.box_count === 1 ? 'box' : 'boxes'} · ${plan.unplaced.length ? `${plan.unplaced.length} unplaced units` : 'All units placed'}` : 'Your latest calculated shipment'}</p></CardHeader><CardContent className="px-5">
         {plan?.boxes[0] ? <><button className="preview-button" onClick={() => onOpenOrder(detail!.id)} aria-label={`Open packing plan ${detail!.order_number}`}><PackingPreview box={plan.boxes[0]}/><span>Explore packing plan <ArrowRight size={15}/></span></button><div className="preview-metrics"><div><b>{plan.box_count}</b><span>Boxes</span></div><div><b>{plan.average_utilization}%</b><span>Utilization</span></div><div><b>{plan.total_weight_kg} kg</b><span>Total weight</span></div></div></> : <div className="dashboard-empty"><Box size={44}/><p>{previewError ? 'Preview unavailable. You can still open the order.' : latest ? 'Loading your packing plan…' : 'Your first packing plan will appear here.'}</p><Button variant="secondary" onClick={() => latest ? onOpenOrder(latest.id) : onUpload()}>{latest ? 'Open order' : 'Create an order'}</Button></div>}
       </CardContent></Card>
-      <Card className="opportunities-card"><CardHeader><CardTitle className="flex items-center gap-2"><Sparkles size={19}/> Packing insights</CardTitle></CardHeader><CardContent className="px-5">
-        {!!pending.length && <button className="insight-row" onClick={() => onOpenOrder(pending[0].id)}><span className="insight-icon warning"><TriangleAlert size={20}/></span><span><b>{pending.length} orders need attention</b><small>Review products before packing.</small></span><ChevronRight size={16}/></button>}
-        {suggestions.map((suggestion,index) => <button className="insight-row" key={index} onClick={() => onOpenOrder(detail!.id)}><span className={`insight-icon ${suggestion.type==='success'?'success':'info'}`}>{suggestion.type==='success'?<Check size={20}/>:<Box size={20}/>}</span><span><b>{suggestion.title}</b><small>{suggestion.detail}</small></span><ChevronRight size={16}/></button>)}
-        {!suggestions.length && <p className="dashboard-empty">{previewError ? 'Open the latest order to view its recommendations.' : 'Recommendations appear here after a packing calculation.'}</p>}
-      </CardContent></Card>
+      <ChecklistOverviewCard onOpenChecklist={onOpenChecklist} />
     </div>
   </div>
 }

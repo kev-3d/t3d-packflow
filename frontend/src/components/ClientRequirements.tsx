@@ -14,6 +14,7 @@ import {
 import { ArrowDown, ArrowUp, ArrowUpDown, FileSpreadsheet, Link2, LoaderCircle, Pencil, Search, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
+import { useCurrentUser } from '../auth'
 import type { Client, ClientRequirement, ClientRequirementInput } from '../types'
 import { DeleteRequirementsDialog, EditRequirementDialog, requirementToInput } from './ClientRequirementDialogs'
 import { Button } from './ui/button'
@@ -53,9 +54,10 @@ interface Actions {
   onEdit: (requirement: ClientRequirement) => void
   onDelete: (requirement: ClientRequirement) => void
   linkingId: number | null
+  canEdit: boolean
 }
 
-const buildColumns = ({ onLink, onEdit, onDelete, linkingId }: Actions) => columnHelper.columns([
+const buildColumns = ({ onLink, onEdit, onDelete, linkingId, canEdit }: Actions) => columnHelper.columns([
   columnHelper.accessor('company', {
     header: sortableHeader('Company'),
     cell: ({ row }) => <span className="block max-w-[220px] truncate font-semibold text-foreground" title={row.original.company}>{row.original.company}</span>,
@@ -66,6 +68,7 @@ const buildColumns = ({ onLink, onEdit, onDelete, linkingId }: Actions) => colum
     cell: ({ row }) => {
       const { client_name, suggested_client } = row.original
       if (client_name) return <span className="requirements-link"><Link2 size={14} aria-hidden="true" /><span className="truncate" title={client_name}>{client_name}</span></span>
+      if (suggested_client && !canEdit) return <span className="text-muted-foreground">Not linked</span>
       if (suggested_client) {
         return (
           <span className="requirements-suggestion">
@@ -83,7 +86,7 @@ const buildColumns = ({ onLink, onEdit, onDelete, linkingId }: Actions) => colum
   columnHelper.accessor('pricing_requirements', { header: 'Pricing / invoice', enableSorting: false, cell: ({ row }) => clamp(row.original.pricing_requirements, 220) }),
   columnHelper.accessor('courier', { header: 'Courier', enableSorting: false, cell: ({ row }) => clamp(row.original.courier, 160) }),
   columnHelper.accessor('comments', { header: 'Comments', enableSorting: false, cell: ({ row }) => clamp(row.original.comments, 220) }),
-  columnHelper.display({
+  ...(canEdit ? [columnHelper.display({
     id: 'actions',
     header: () => <span className="sr-only">Actions</span>,
     cell: ({ row }) => (
@@ -92,7 +95,7 @@ const buildColumns = ({ onLink, onEdit, onDelete, linkingId }: Actions) => colum
         <Button variant="ghost" size="icon" className="order-action order-action--delete" title="Delete requirements" aria-label={`Delete requirements for ${row.original.company}`} onClick={() => onDelete(row.original)}><Trash2 size={16} /></Button>
       </div>
     ),
-  }),
+  })] : []),
 ])
 
 interface Props {
@@ -104,6 +107,7 @@ interface Props {
 }
 
 export function ClientRequirements({ requirements, clients, loading, reload, notify }: Props) {
+  const { is_admin: isAdmin } = useCurrentUser()
   const [query, setQuery] = useState('')
   const [onlyUnlinked, setOnlyUnlinked] = useState(false)
   const [sorting, setSorting] = useState<SortingState>([{ id: 'company', desc: false }])
@@ -132,8 +136,8 @@ export function ClientRequirements({ requirements, clients, loading, reload, not
   }
 
   const columns = useMemo(() => buildColumns({
-    onLink: link, onEdit: setEditing, onDelete: (requirement) => { setDeleteError(''); setDeleteTarget(requirement) }, linkingId,
-  }), [linkingId])
+    onLink: link, onEdit: setEditing, onDelete: (requirement) => { setDeleteError(''); setDeleteTarget(requirement) }, linkingId, canEdit: isAdmin,
+  }), [linkingId, isAdmin])
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -213,12 +217,14 @@ export function ClientRequirements({ requirements, clients, loading, reload, not
           <button aria-pressed={onlyUnlinked} className={onlyUnlinked ? 'is-active' : undefined} disabled={!unlinkedCount && !onlyUnlinked} onClick={() => { setOnlyUnlinked((value) => !value); table.setPageIndex(0) }}>
             Not linked ({unlinkedCount})
           </button>
+          {isAdmin && <>
           <button disabled={importing} onClick={() => fileRef.current?.click()}>
             {importing ? <LoaderCircle size={16} className="spin" /> : <FileSpreadsheet size={16} />} {importing ? 'Importing…' : 'Import requirements'}
           </button>
           <button className="clients-delete-all" disabled={!requirements.length || importing} onClick={() => { setDeleteError(''); setDeleteTarget(true) }}>
             <Trash2 size={16} /> Delete all
           </button>
+          </>}
         </div>
       </div>
       <p className="clients-hint requirements-hint">Orders whose customer matches a company below show these as a packing note. Link each company to its client so the match survives name differences.</p>

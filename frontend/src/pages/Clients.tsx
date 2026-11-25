@@ -14,6 +14,7 @@ import {
 import { ArrowDown, ArrowUp, ArrowUpDown, ClipboardList, FileSpreadsheet, LoaderCircle, Map as MapIcon, Pencil, Search, StickyNote, Table2, Trash2 } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
+import { useCurrentUser } from '../auth'
 import { DeleteClientsDialog, EditClientDialog } from '../components/ClientDialogs'
 import { ClientRequirements } from '../components/ClientRequirements'
 import { WordmarkPagination } from '../components/WordmarkPagination'
@@ -83,9 +84,9 @@ const buildDataColumns = (noteClientIds: ReadonlySet<number>) => [
   }),
 ]
 
-const buildColumns = (onEdit: (client: Client) => void, onDelete: (client: Client) => void, noteClientIds: ReadonlySet<number>) => columnHelper.columns([
+const buildColumns = (onEdit: (client: Client) => void, onDelete: (client: Client) => void, noteClientIds: ReadonlySet<number>, canEdit: boolean) => columnHelper.columns([
   ...buildDataColumns(noteClientIds),
-  columnHelper.display({
+  ...(canEdit ? [columnHelper.display({
     id: 'actions',
     header: () => <span className="sr-only">Actions</span>,
     enableSorting: false,
@@ -95,10 +96,11 @@ const buildColumns = (onEdit: (client: Client) => void, onDelete: (client: Clien
         <Button variant="ghost" size="icon" className="order-action order-action--delete" title="Delete client" aria-label={`Delete ${row.original.customer}`} onClick={() => onDelete(row.original)}><Trash2 size={16} /></Button>
       </div>
     ),
-  }),
+  })] : []),
 ])
 
 export function Clients({ notify }: { notify: (message: string, error?: boolean) => void }) {
+  const { is_admin: isAdmin } = useCurrentUser()
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
@@ -116,7 +118,7 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
   const [deleteError, setDeleteError] = useState('')
   // Clients that have a packing note get a small marker next to their name.
   const noteClientIds = useMemo(() => new Set(requirements.flatMap((requirement) => requirement.client_id === null ? [] : [requirement.client_id])), [requirements])
-  const columns = useMemo(() => buildColumns(setEditing, (client) => { setDeleteError(''); setDeleteTarget(client) }, noteClientIds), [noteClientIds])
+  const columns = useMemo(() => buildColumns(setEditing, (client) => { setDeleteError(''); setDeleteTarget(client) }, noteClientIds, isAdmin), [noteClientIds, isAdmin])
 
   const load = useCallback(async () => {
     try { setClients(await api.clients()) }
@@ -221,7 +223,7 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
         ) : <>
         <div className="table-tools">
           <label><Search size={17} /><Input aria-label="Search clients" type="search" value={query} onChange={(event) => { setQuery(event.target.value); table.setPageIndex(0) }} placeholder="Search customer, contact, email or country…" /></label>
-          <div>
+          {isAdmin && <div>
             <input ref={fileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={(event) => importFile(event.target.files?.[0])} />
             <button disabled={importing} onClick={() => fileRef.current?.click()}>
               {importing ? <LoaderCircle size={16} className="spin" /> : <FileSpreadsheet size={16} />} {importing ? 'Importing…' : 'Import Excel'}
@@ -229,7 +231,7 @@ export function Clients({ notify }: { notify: (message: string, error?: boolean)
             <button className="clients-delete-all" disabled={!clients.length || importing} onClick={() => { setDeleteError(''); setDeleteTarget(true) }}>
               <Trash2 size={16} /> Delete all
             </button>
-          </div>
+          </div>}
         </div>
         {view === 'map' ? (
           <Suspense fallback={<p className="clients-map__loading" role="status">Loading map…</p>}>

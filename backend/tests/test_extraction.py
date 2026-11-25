@@ -7,7 +7,9 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
 from app.extraction import (
+    _Cell,
     _detect_decimal,
+    _restore_wrapped_lines,
     _is_item_start,
     _layout_rows,
     _page_fragments,
@@ -44,7 +46,65 @@ SUPPLIER_LAYOUT = [
 ]
 
 
+# A price-less PO sent by a distributor: internal IDs and EAN before the description, quantity as the
+# last column, an ISO date under its label, and a "Total qty" line that is not money.
+QUANTITY_ONLY_LAYOUT = [
+    (300, 800, "Example Printers Nordic AB"),
+    (300, 700, "211 24 MALMO, SWEDEN"), (420, 700, "Purchase order 674993"),
+    (34, 685, "Supplier"),
+    (34, 674, "Thought3D"), (318, 674, "Our order ID"), (442, 674, "Reorder date"),
+    (34, 664, "146, Morning Dew"), (318, 664, "674993"), (442, 664, "2026-11-20"),
+    (34, 654, "SWQ 30 Swiegq"),
+    (39, 566, "Pos Our Item EAN Supplier Item ID Description Quantity"),
+    (39, 543, "1 23642 4721 5350583999945 MPC2018 Magigoo Pro PC - The 3D printing"), (542, 543, "150"),
+    (359, 532, "adhesive"),
+    (39, 516, "2 31879 16016 5350583000177 MGO2025 Magigoo Glide Original - 250 ml"), (547, 516, "5"),
+    (495, 480, "Total qty 155,00"),
+    (34, 440, "Delivery address:"),
+    (34, 427, "Example Printers Nordic AB"),
+    (34, 414, "Examplegatan 1"),
+    (34, 401, "211 24 MALMO"),
+    (34, 388, "Sweden"),
+    (34, 340, "Please add our purchase order number 674993 to all documents."),
+]
+
+
+# An English PO in wording the parser has not seen in the reference documents: "PO Number", a written
+# month, lines that start with their code, a description line that starts with "Total", a page footer
+# inside the table, "Sales Tax" and "Grand Total", and a third-party vendor beside its label.
+GENERIC_LAYOUT = [
+    (50, 800, "Acme Robotics"), (400, 800, "PURCHASE ORDER"),
+    (50, 786, "500 Market Street, Springfield"),
+    (400, 780, "PO Number: AR-1001"),
+    (400, 766, "Order Date: Oct 23, 2026"),
+    (50, 740, "Bill To:"), (300, 740, "Vendor:"), (350, 740, "Northwind Ltd"),
+    (50, 727, "Acme Robotics Inc."),
+    (50, 690, "Item"), (120, 690, "Description"), (330, 690, "Qty"), (390, 690, "Unit Price"), (480, 690, "Amount"),
+    (50, 670, "WG-10"), (120, 670, "Widget"), (330, 670, "4"), (390, 670, "2.50"), (480, 670, "10.00"),
+    (120, 658, "Total protection for your desk"),
+    (280, 645, "Page 1 of 1"),
+    (50, 630, "WG-20"), (120, 630, "Gadget 500 ml"), (330, 630, "3"), (390, 630, "1.00"), (480, 630, "3.00"),
+    (380, 600, "Sub Total"), (480, 600, "13.00"),
+    (380, 586, "Sales Tax"), (480, 586, "1.04"),
+    (380, 572, "Grand Total"), (480, 572, "$14.04"),
+]
+
+
 class NumberAndLineRulesTests(unittest.TestCase):
+    def test_a_wrapped_line_mispositioned_by_pypdf_returns_under_its_row(self):
+        fragments = [
+            _Cell(39.4, 543.4, "1"), _Cell(0, 0, "Magigoo Pro PC - The 3D printing"),
+            _Cell(359.5, 448.9, "adhesive"),  # pypdf reports it ~95 pt too low
+            _Cell(542.5, 543.4, "150"),
+        ]
+        restored = _restore_wrapped_lines(fragments)
+        self.assertAlmostEqual(restored[2].y, 543.4 - 11.0)
+        self.assertEqual(restored[3], fragments[3])
+
+    def test_a_line_far_from_unrelated_neighbours_stays_where_it_is(self):
+        fragments = [_Cell(34, 236, "Delivery address:"), _Cell(34, 141, "Please add"), _Cell(298, 815, "Letterhead")]
+        self.assertEqual(_restore_wrapped_lines(fragments), fragments)
+
     def test_solves_quantity_price_and_amount_from_the_row_numbers(self):
         self.assertEqual(_solve_line([25, 11.9, 297.5]), (25, 11.9, 297.5, 0.0))
 
@@ -109,6 +169,56 @@ class PurchaseOrderPdfTests(unittest.TestCase):
         self.assertTrue(any("does not match the amount" in warning for warning in result["warnings"]))
         self.assertLess(result["confidence"], 0.95)
 
+    def test_reads_a_price_less_order_with_internal_ids_before_the_description(self):
+        result = extract_pdf(make_pdf(QUANTITY_ONLY_LAYOUT), "order.pdf")
+
+        self.assertEqual(result["order_number"], "674993")
+        self.assertEqual(result["client"], "Example Printers Nordic AB")
+        self.assertEqual(result["order_date"], "2026-11-20")
+        self.assertEqual(
+            [(i["sku_raw"], i["description"], i["quantity"], i["amount"]) for i in result["items"]],
+            [
+                ("MPC2018", "Magigoo Pro PC - The 3D printing adhesive", 150, 0.0),
+                ("MGO2025", "Magigoo Glide Original - 250 ml", 5, 0.0),
+            ],
+        )
+        self.assertEqual(result["total_amount"], 0)  # "Total qty 155,00" is a quantity, not money
+        self.assertEqual(result["delivery_address"], "Example Printers Nordic AB\nExamplegatan 1\n211 24 MALMO\nSweden")
+        self.assertEqual(result["warnings"], ["This purchase order has no prices; only quantities were read."])
+
+    def test_a_total_quantity_that_disagrees_with_the_lines_is_flagged(self):
+        layout = [cell if cell[2] != "Total qty 155,00" else (495, 480, "Total qty 160,00") for cell in QUANTITY_ONLY_LAYOUT]
+        result = extract_pdf(make_pdf(layout), "order.pdf")
+
+        self.assertTrue(any("total quantity is 160" in warning for warning in result["warnings"]))
+
+    def test_reads_an_unseen_english_layout_from_the_lexicon(self):
+        result = extract_pdf(make_pdf(GENERIC_LAYOUT), "order.pdf")
+
+        self.assertEqual(result["order_number"], "AR-1001")
+        self.assertEqual(result["order_date"], "2026-10-23")  # a written month is never ambiguous
+        self.assertEqual(result["client"], "Acme Robotics Inc.")
+        self.assertEqual(result["vendor"], "Northwind Ltd")
+        self.assertEqual(result["currency"], "USD")
+        self.assertEqual(
+            [(i["sku_raw"], i["description"], i["quantity"], i["unit_price"], i["amount"]) for i in result["items"]],
+            [("WG-10", "Widget", 4, 2.5, 10.0), ("WG-20", "Gadget 500 ml", 3, 1.0, 3.0)],
+        )
+        self.assertEqual((result["subtotal"], result["tax_amount"], result["total_amount"]), (13.0, 1.04, 14.04))
+        self.assertEqual(result["warnings"], [])
+        self.assertIn("PO Number", result["field_sources"]["order_number"])
+
+    def test_a_title_is_never_read_from_the_line_under_it(self):
+        layout = [
+            (400, 780, "Purchase Order"), (400, 766, "50859 Koeln"),
+            (50, 600, "1"), (140, 600, "WIDGET"), (400, 600, "3"), (450, 600, "10.00"), (510, 600, "30.00"),
+            (380, 480, "Total 30.00 EUR"),
+        ]
+        result = extract_pdf(make_pdf(layout), "order.pdf")
+
+        self.assertTrue(result["order_number"].startswith("PDF-"))
+        self.assertIn("Order number not found; a temporary number was assigned.", result["warnings"])
+
     def test_a_document_without_product_lines_says_so(self):
         result = extract_pdf(make_pdf([(50, 600, "Hello, this is a letter without a product table.")]), "letter.pdf")
 
@@ -126,7 +236,10 @@ class ReferenceDocumentTests(unittest.TestCase):
         cls.folder = Path(os.environ["PACKFLOW_PDF_FIXTURES"])
 
     def read(self, name):
-        return extract_pdf((self.folder / name).read_bytes(), name)
+        path = self.folder / name
+        if not path.exists():
+            self.skipTest(f"{name} is not in PACKFLOW_PDF_FIXTURES")
+        return extract_pdf(path.read_bytes(), name)
 
     def test_3dmensionals_order(self):
         result = self.read("Purchase Order - P2624730.pdf")
@@ -153,6 +266,28 @@ class ReferenceDocumentTests(unittest.TestCase):
         self.assertEqual([i["quantity"] for i in result["items"]], [10, 2, 2, 2, 5])
         self.assertEqual(result["subtotal"], 975.5)
         self.assertEqual(result["warnings"], [])
+
+    def test_prima_order_without_prices(self):
+        result = self.read("PurchaseOrder_DOC-02020_674993.pdf")
+        self.assertEqual(result["order_number"], "674993")
+        self.assertEqual(result["client"], "Prima Printer Nordic AB")
+        self.assertEqual(result["order_date"], "2026-11-20")
+        self.assertEqual([i["sku_raw"] for i in result["items"]], [
+            "MPC2018", "MPP2018", "MPA2019", "MF2019", "MHT2019", "MPPGF2019",
+            "MO2016", "MGK2025", "MGO2025", "MS2025", "MGK2025-SG", "MGPA2025",
+        ])
+        self.assertEqual([i["quantity"] for i in result["items"]], [150, 150, 1000, 50, 50, 25, 250, 10, 5, 250, 10, 5])
+        self.assertEqual(result["items"][5]["description"], "Magigoo Pro PP - GF - The 3D printing adhesive")
+        self.assertTrue(result["delivery_address"].startswith("3D Prima / Prima Printer Nordic AB"))
+        self.assertEqual(result["warnings"], ["This purchase order has no prices; only quantities were read."])
+
+    def test_sample_order_with_codes_instead_of_line_numbers(self):
+        result = self.read("sample-po.pdf")
+        self.assertEqual(result["order_number"], "EL-88213")
+        self.assertEqual(result["client"], "Example Labs B.V.")
+        self.assertEqual([(i["sku_raw"], i["description"], i["quantity"], i["amount"]) for i in result["items"]],
+                         [("MG-50", "50 ml", 60, 570.0), ("MG-120", "120 ml", 12, 192.0), ("PK-100", "ProKit", 4, 180.0)])
+        self.assertEqual(result["subtotal"], 942.0)
 
 
 if __name__ == "__main__":

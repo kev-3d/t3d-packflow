@@ -14,10 +14,16 @@ interface Props {
   busy: boolean
   pending?: PackingObjective
   onSelect: (objective: PackingObjective) => void
+  allowanceCm: number
+  onAllowanceChange: (allowanceCm: number) => void
 }
 
+export const DEFAULT_ALLOWANCE_CM = 0.5
+const ALLOWANCE_PRESETS = [0, 0.2, 0.3, 0.5, 0.75, 1, 1.5, 2]
+
 /** Compare the best plan for each packing objective and recalculate with another one. */
-export function PackingObjectives({ options, zone, zoneAssumed, busy, pending, onSelect }: Props) {
+export function PackingObjectives({ options, zone, zoneAssumed, busy, pending, onSelect, allowanceCm, onAllowanceChange }: Props) {
+  const presets = ALLOWANCE_PRESETS.includes(allowanceCm) ? ALLOWANCE_PRESETS : [...ALLOWANCE_PRESETS, allowanceCm].sort((a, b) => a - b)
   const best = {
     box_count: Math.min(...options.map(o => o.box_count)),
     estimated_dhl_eur: Math.min(...options.map(o => o.estimated_dhl_eur)),
@@ -30,6 +36,12 @@ export function PackingObjectives({ options, zone, zoneAssumed, busy, pending, o
           <h2 id="packing-objectives-title">Packing goal</h2>
           <p>Best plan found for each goal. DHL estimate: transport + piece surcharges for zone {zone}{zoneAssumed ? ' (destination not detected, assumed)' : ''}, before fuel, demand and VAT.</p>
         </div>
+        <label className="packing-allowance" title="Space kept free between the products and each carton wall. Less clearance fits more units per box.">
+          <span>Wall clearance</span>
+          <select value={allowanceCm} disabled={busy} onChange={event => onAllowanceChange(Number(event.target.value))}>
+            {presets.map(value => <option key={value} value={value}>{value} cm{value === DEFAULT_ALLOWANCE_CM ? ' (default)' : ''}</option>)}
+          </select>
+        </label>
       </header>
       <div className="packing-objectives__grid" role="radiogroup" aria-label="Packing goal">
         {options.map(option => {

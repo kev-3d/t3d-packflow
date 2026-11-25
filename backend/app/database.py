@@ -1,192 +1,105 @@
 from __future__ import annotations
 
+import atexit
+import hashlib
 import json
 import os
-import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from .db import (
+    Database,
+    DatabaseError,
+    IntegrityError,
+    connect_postgres,
+    connect_sqlite,
+    drop_created_schemas,
+    is_postgres_url,
+)
 from .language import english_plan_copy
 
+__all__ = ["DB_PATH", "Database", "DatabaseError", "IntegrityError", "connect", "database_engine", "init_db"]
 
 APP_DIR = Path(__file__).resolve().parent
+SCHEMA_DIR = APP_DIR / "schema"
 DEFAULT_DB_PATH = APP_DIR.parent / "data" / "packflow.db"
 DB_PATH = Path(os.getenv("PACKFLOW_DB_PATH", DEFAULT_DB_PATH))
+
+# Serialises concurrent schema migrations (several workers starting at once).
+_MIGRATION_LOCK_ID = 7245_0001
 
 
 def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    return connection
+def database_engine() -> str:
+    """'postgres' when DATABASE_URL (or the test URL) points to PostgreSQL, else 'sqlite'."""
+    if os.getenv("PACKFLOW_TEST_DATABASE_URL") or is_postgres_url(os.getenv("DATABASE_URL", "").strip()):
+        return "postgres"
+    return "sqlite"
+
+
+def _test_schema(path: Path) -> str:
+    # The test-suite points DB_PATH at a fresh temporary file per test; on PostgreSQL each
+    # such path gets its own schema, so tests stay isolated without code changes.
+    return "test_" + hashlib.sha1(str(path).encode("utf-8")).hexdigest()[:24]
+
+
+def connect() -> Database:
+    """Open a unit of work: ``with connect() as db`` commits on success, rolls back on error
+    and always releases the connection."""
+    test_url = os.getenv("PACKFLOW_TEST_DATABASE_URL", "").strip()
+    if test_url:
+        return connect_postgres(test_url, schema=_test_schema(DB_PATH))
+    url = os.getenv("DATABASE_URL", "").strip()
+    if is_postgres_url(url):
+        return connect_postgres(url, max_size=int(os.getenv("PACKFLOW_DB_POOL_MAX", "5")))
+    return connect_sqlite(DB_PATH)
+
+
+if os.getenv("PACKFLOW_TEST_DATABASE_URL"):
+    atexit.register(drop_created_schemas)
 
 
 def init_db() -> None:
     with connect() as db:
-        db.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS app_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS products (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sku TEXT NOT NULL UNIQUE,
-                name TEXT NOT NULL,
-                length_cm REAL NOT NULL CHECK(length_cm > 0),
-                width_cm REAL NOT NULL CHECK(width_cm > 0),
-                height_cm REAL NOT NULL CHECK(height_cm > 0),
-                weight_kg REAL NOT NULL CHECK(weight_kg > 0),
-                price_eur REAL NOT NULL DEFAULT 0 CHECK(price_eur >= 0),
-                rotation_allowed INTEGER NOT NULL DEFAULT 1,
-                fragile INTEGER NOT NULL DEFAULT 0,
-                active INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS box_types (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code TEXT NOT NULL UNIQUE,
-                name TEXT NOT NULL,
-                length_cm REAL NOT NULL CHECK(length_cm > 0),
-                width_cm REAL NOT NULL CHECK(width_cm > 0),
-                height_cm REAL NOT NULL CHECK(height_cm > 0),
-                empty_weight_kg REAL NOT NULL CHECK(empty_weight_kg >= 0),
-                max_weight_kg REAL NOT NULL CHECK(max_weight_kg > 0),
-                active INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS orders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                order_number TEXT NOT NULL UNIQUE,
-                client TEXT NOT NULL,
-                vendor TEXT NOT NULL DEFAULT '',
-                order_date TEXT,
-                requested_date TEXT,
-                currency TEXT NOT NULL DEFAULT 'USD',
-                source_filename TEXT,
-                source_type TEXT NOT NULL DEFAULT 'pdf',
-                delivery_address TEXT NOT NULL DEFAULT '',
-                billing_address TEXT NOT NULL DEFAULT '',
-                terms TEXT NOT NULL DEFAULT '',
-                notes TEXT NOT NULL DEFAULT '',
-                subtotal REAL NOT NULL DEFAULT 0,
-                tax_amount REAL NOT NULL DEFAULT 0,
-                total_amount REAL NOT NULL DEFAULT 0,
-                status TEXT NOT NULL DEFAULT 'needs_review',
-                confidence REAL NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS order_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-                product_id INTEGER REFERENCES products(id),
-                sku_raw TEXT NOT NULL,
-                description TEXT NOT NULL,
-                quantity INTEGER NOT NULL CHECK(quantity > 0),
-                unit_price REAL NOT NULL DEFAULT 0,
-                line_number INTEGER,
-                requested_date TEXT,
-                tax_label TEXT NOT NULL DEFAULT '',
-                discount_percent REAL NOT NULL DEFAULT 0,
-                amount REAL NOT NULL DEFAULT 0,
-                is_suggested INTEGER NOT NULL DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS packing_plans (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-                box_count INTEGER NOT NULL,
-                average_utilization REAL NOT NULL,
-                total_weight_kg REAL NOT NULL,
-                result_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS source_documents (
-                order_id INTEGER PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
-                filename TEXT NOT NULL,
-                content BLOB NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS analysis_reports (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-                plan_id INTEGER UNIQUE REFERENCES packing_plans(id) ON DELETE SET NULL,
-                filename TEXT NOT NULL,
-                pdf_content BLOB NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS clients (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                customer TEXT NOT NULL,
-                phone_number TEXT NOT NULL DEFAULT '',
-                email TEXT NOT NULL DEFAULT '',
-                contact_name TEXT NOT NULL DEFAULT '',
-                address TEXT NOT NULL DEFAULT '',
-                country TEXT NOT NULL DEFAULT '',
-                shipping_address TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS shipping_quotes (
-                order_id INTEGER PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
-                plan_id INTEGER,
-                inputs_json TEXT NOT NULL,
-                result_json TEXT NOT NULL,
-                tariff_version TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_customer ON clients(lower(trim(customer)));
-            CREATE TABLE IF NOT EXISTS client_requirements (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                company TEXT NOT NULL,
-                company_key TEXT NOT NULL UNIQUE,
-                aliases TEXT NOT NULL DEFAULT '',
-                client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
-                invoice_email TEXT NOT NULL DEFAULT '',
-                payment TEXT NOT NULL DEFAULT '',
-                pricing_requirements TEXT NOT NULL DEFAULT '',
-                docs_required TEXT NOT NULL DEFAULT '',
-                courier TEXT NOT NULL DEFAULT '',
-                comments TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
-            CREATE INDEX IF NOT EXISTS idx_plans_order ON packing_plans(order_id, id DESC);
-            """
-        )
-        _migrate_schema(db)
+        if db.dialect == "postgres":
+            _apply_postgres_migrations(db)
+        else:
+            db.executescript((SCHEMA_DIR / "sqlite.sql").read_text(encoding="utf-8"))
+            _migrate_schema(db)
+        _apply_reference_packing_data(db)
         seed_demo_data(db)
         if os.getenv("PACKFLOW_SEED_REFERENCE_CATALOG", "").lower() in {"1", "true"}:
             seed_reference_catalog(db)
+        _apply_tsca_catalog(db)
 
 
-def _ensure_column(
-    db: sqlite3.Connection, table: str, column: str, definition: str
-) -> None:
+def _apply_postgres_migrations(db: Database) -> None:
+    """Apply the numbered scripts in schema/postgres/ that are not yet recorded."""
+    db.execute("SELECT pg_advisory_xact_lock(?)", (_MIGRATION_LOCK_ID,))
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
+    )
+    applied = {row["version"] for row in db.execute("SELECT version FROM schema_migrations")}
+    for script in sorted((SCHEMA_DIR / "postgres").glob("*.sql")):
+        if script.stem in applied:
+            continue
+        db.executescript(script.read_text(encoding="utf-8"))
+        db.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", (script.stem, now_iso()))
+
+
+def _ensure_column(db: Database, table: str, column: str, definition: str) -> None:
     existing = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
     if column not in existing:
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
-def _migrate_schema(db: sqlite3.Connection) -> None:
-    """Aplica migraciones aditivas para bases SQLite creadas por versiones anteriores."""
+def _migrate_schema(db: Database) -> None:
+    """Additive migrations for SQLite databases created by earlier versions (SQLite only;
+    PostgreSQL uses the numbered scripts in schema/postgres/)."""
     order_columns = {
         "vendor": "TEXT NOT NULL DEFAULT ''",
         "requested_date": "TEXT",
@@ -211,48 +124,148 @@ def _migrate_schema(db: sqlite3.Connection) -> None:
         _ensure_column(db, "orders", column, definition)
     for column, definition in item_columns.items():
         _ensure_column(db, "order_items", column, definition)
-    _ensure_column(db, "products", "price_eur", "REAL NOT NULL DEFAULT 0")
+    # Prices come from each purchase order, not from the catalog.
+    if "price_eur" in {row["name"] for row in db.execute("PRAGMA table_info(products)")}:
+        db.execute("ALTER TABLE products DROP COLUMN price_eur")
+    # Packing data from the workbook "what fits" sheet: a product's capacity family and,
+    # per box type, how many units of each family it holds (JSON).
+    _ensure_column(db, "products", "capacity_family", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(db, "box_types", "capacities", "TEXT NOT NULL DEFAULT '{}'")
+    # Reference only (not enforced by packing): how many 50 ml / 250 ml products fit in the box in theory.
+    _ensure_column(db, "box_types", "reference_50ml", "INTEGER")
+    _ensure_column(db, "box_types", "reference_250ml", "INTEGER")
+    # TSCA certification: product number (EAN) and the wording printed on the declaration.
+    _ensure_column(db, "products", "ean", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(db, "products", "tsca_name", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(db, "products", "tsca_description", "TEXT NOT NULL DEFAULT ''")
+    # Shipment checklist (mirrors schema/postgres/005_shipment_checklist.sql).
+    if "pack_status" not in {row["name"] for row in db.execute("PRAGMA table_info(shipments)")}:
+        _ensure_column(db, "shipments", "pack_status", "TEXT NOT NULL DEFAULT 'to_pack'")
+        _ensure_column(db, "shipments", "pickup_date", "TEXT")
+        _ensure_column(db, "shipments", "pickup_slot", "TEXT")
+        _ensure_column(db, "shipments", "picked_up_at", "TEXT")
+        # Shipments dated before this feature existed already left the warehouse.
+        db.execute("UPDATE shipments SET pack_status = 'picked_up', picked_up_at = ship_date "
+                   "WHERE ship_date < date('now', 'localtime')")
+    db.execute("CREATE INDEX IF NOT EXISTS shipments_pack_status_idx ON shipments (pack_status)")
 
 
-def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
+def _apply_reference_packing_data(db: Database) -> None:
+    """One-time backfill of the workbook packing data for existing records.
+
+    A box gets the "what fits" capacities of the reference box with the same code or the
+    same inner dimensions (catalogs often rename boxes); its provisional 25 kg limit
+    becomes 20 kg, as in the DHL calculator. A product gets its capacity family from its
+    name or its packed size. Only empty values are filled; user edits are kept.
+    """
+    from .extraction import capacity_family_for  # local import: extraction does not need the database
+
+    if db.execute("SELECT 1 FROM app_settings WHERE key = 'reference_packing_data_v2'").fetchone():
+        return
+    db.execute("INSERT INTO app_settings (key, value) VALUES ('reference_packing_data_v2', '1') ON CONFLICT (key) DO NOTHING")
+    catalog = json.loads((APP_DIR / "reference_catalog.json").read_text(encoding="utf-8"))
+
+    def size(row: Any) -> tuple[float, ...]:
+        return tuple(sorted(round(float(row[key]), 2) for key in ("length_cm", "width_cm", "height_cm")))
+
+    by_code = {box["code"]: box for box in catalog["boxes"]}
+    by_size = {size(box): box for box in catalog["boxes"]}
+    for row in db.execute("SELECT id, code, length_cm, width_cm, height_cm, capacities FROM box_types").fetchall():
+        reference = by_code.get(row["code"]) or by_size.get(size(row))
+        if reference is None:
+            continue
+        if row["capacities"] in ("", "{}"):
+            db.execute("UPDATE box_types SET capacities = ? WHERE id = ?",
+                       (json.dumps(reference.get("capacities", {})), row["id"]))
+        db.execute("UPDATE box_types SET max_weight_kg = ? WHERE id = ? AND max_weight_kg = 25",
+                   (reference["max_weight_kg"], row["id"]))
+    for row in db.execute(
+        "SELECT id, name, length_cm, width_cm, height_cm FROM products WHERE capacity_family = ''"
+    ).fetchall():
+        family = capacity_family_for(row["name"], (row["length_cm"], row["width_cm"], row["height_cm"]))
+        if family:
+            db.execute("UPDATE products SET capacity_family = ? WHERE id = ?", (family, row["id"]))
+
+
+def load_tsca_catalog() -> dict[str, dict[str, Any]]:
+    """EAN and TSCA wording keyed by every normalized product-name alias."""
+    from .naming import normalize_product_name
+
+    catalog = json.loads((APP_DIR / "tsca_catalog.json").read_text(encoding="utf-8"))
+    return {normalize_product_name(alias): entry for entry in catalog["products"] for alias in entry["aliases"]}
+
+
+def apply_tsca_catalog(db: Database) -> int:
+    """Fill empty EAN / TSCA name / TSCA description from the price-list catalog by product name.
+
+    Values already present (typed by a user) are never overwritten. Returns the products touched.
+    """
+    from .naming import normalize_product_name
+
+    by_alias = load_tsca_catalog()
+    touched = 0
+    for row in db.execute("SELECT id, name, ean, tsca_name, tsca_description FROM products").fetchall():
+        entry = by_alias.get(normalize_product_name(row["name"]))
+        if entry is None:
+            continue
+        values = {"ean": entry["ean"], "tsca_name": entry.get("tsca_name", ""),
+                  "tsca_description": entry.get("tsca_description", "")}
+        updates = {key: value for key, value in values.items() if value and not (row[key] or "").strip()}
+        if updates:
+            assignments = ", ".join(f"{key} = ?" for key in updates)
+            db.execute(f"UPDATE products SET {assignments} WHERE id = ?", (*updates.values(), row["id"]))
+            touched += 1
+    return touched
+
+
+def _apply_tsca_catalog(db: Database) -> None:
+    """One-time backfill of the price-list EANs for existing catalogs."""
+    if db.execute("SELECT 1 FROM app_settings WHERE key = 'tsca_catalog_v1'").fetchone():
+        return
+    db.execute("INSERT INTO app_settings (key, value) VALUES ('tsca_catalog_v1', '1') ON CONFLICT (key) DO NOTHING")
+    apply_tsca_catalog(db)
+
+
+def rows_to_dicts(rows: Iterable[Any]) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def seed_reference_catalog(db: sqlite3.Connection) -> None:
+def seed_reference_catalog(db: Database) -> None:
     """Restore the demo's reference catalog on fresh ephemeral instances.
 
     Only insert missing records. User edits, disabled records and imported
     measurements must survive subsequent startup calls on the same database.
     """
-    catalog = json.loads((APP_DIR / "reference_catalog.json").read_text())
+    catalog = json.loads((APP_DIR / "reference_catalog.json").read_text(encoding="utf-8"))
     for product in catalog["products"]:
         db.execute(
             """INSERT INTO products
                 (sku, name, length_cm, width_cm, height_cm, weight_kg,
-                 rotation_allowed, fragile, active, created_at)
-               SELECT ?, ?, ?, ?, ?, ?, ?, ?, 1, ?
+                 rotation_allowed, fragile, capacity_family, active, created_at)
+               SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?
                WHERE NOT EXISTS (SELECT 1 FROM products WHERE lower(trim(name)) = lower(?))
                ON CONFLICT(sku) DO NOTHING""",
             (product["sku"], product["name"], product["length_cm"], product["width_cm"],
              product["height_cm"], product["weight_kg"], product["rotation_allowed"],
-             product["fragile"], now_iso(), product["name"]),
+             product["fragile"], product.get("capacity_family", ""), now_iso(), product["name"]),
         )
     for box in catalog["boxes"]:
         db.execute(
             """INSERT INTO box_types
                 (code, name, length_cm, width_cm, height_cm, empty_weight_kg,
-                 max_weight_kg, active, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                 max_weight_kg, capacities, active, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                ON CONFLICT(code) DO NOTHING""",
             (box["code"], box["name"], box["length_cm"], box["width_cm"], box["height_cm"],
-             box["empty_weight_kg"], box["max_weight_kg"], now_iso()),
+             box["empty_weight_kg"], box["max_weight_kg"], json.dumps(box.get("capacities", {})), now_iso()),
         )
+    apply_tsca_catalog(db)
 
 
-def seed_demo_data(db: sqlite3.Connection) -> None:
+def seed_demo_data(db: Database) -> None:
     # Seed the demo catalog only once, so records the user deletes do not return on restart.
     catalog_seeded = db.execute("SELECT 1 FROM app_settings WHERE key = 'demo_catalog_seeded'").fetchone()
-    db.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('demo_catalog_seeded', '1')")
+    db.execute("INSERT INTO app_settings (key, value) VALUES ('demo_catalog_seeded', '1') ON CONFLICT (key) DO NOTHING")
     if not catalog_seeded and db.execute("SELECT COUNT(*) FROM products").fetchone()[0] == 0:
         timestamp = now_iso()
         db.executemany(
@@ -290,7 +303,7 @@ def seed_demo_data(db: sqlite3.Connection) -> None:
         )
 
     seeded = db.execute("SELECT 1 FROM app_settings WHERE key = 'demo_orders_seeded'").fetchone()
-    db.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('demo_orders_seeded', '1')")
+    db.execute("INSERT INTO app_settings (key, value) VALUES ('demo_orders_seeded', '1') ON CONFLICT (key) DO NOTHING")
     if not seeded and db.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0:
         products = {
             row["sku"]: row["id"]
@@ -321,16 +334,16 @@ def seed_demo_data(db: sqlite3.Connection) -> None:
             ),
         ]
         for number, client, date, confidence, items in demo_orders:
-            cursor = db.execute(
+            order_id = db.insert_returning_id(
                 """
                 INSERT INTO orders
                     (order_number, client, order_date, currency, source_filename,
                      status, confidence, created_at, updated_at)
                 VALUES (?, ?, ?, 'USD', 'orden-demo.pdf', 'ready', ?, ?, ?)
+                RETURNING id
                 """,
                 (number, client, date, confidence, timestamp, timestamp),
             )
-            order_id = cursor.lastrowid
             db.executemany(
                 """
                 INSERT INTO order_items
@@ -351,7 +364,7 @@ def seed_demo_data(db: sqlite3.Connection) -> None:
             )
 
 
-def get_shipping_quote(db: sqlite3.Connection, order_id: int) -> dict[str, Any] | None:
+def get_shipping_quote(db: Database, order_id: int) -> dict[str, Any] | None:
     row = db.execute("SELECT * FROM shipping_quotes WHERE order_id = ?", (order_id,)).fetchone()
     if not row:
         return None
@@ -366,18 +379,22 @@ def get_shipping_quote(db: sqlite3.Connection, order_id: int) -> dict[str, Any] 
 
 
 def save_shipping_quote(
-    db: sqlite3.Connection, order_id: int, plan_id: int | None, inputs: dict[str, Any], result: dict[str, Any]
+    db: Database, order_id: int, plan_id: int | None, inputs: dict[str, Any], result: dict[str, Any]
 ) -> dict[str, Any]:
     db.execute(
-        """INSERT OR REPLACE INTO shipping_quotes
+        """INSERT INTO shipping_quotes
            (order_id, plan_id, inputs_json, result_json, tariff_version, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (order_id) DO UPDATE SET
+               plan_id = excluded.plan_id, inputs_json = excluded.inputs_json,
+               result_json = excluded.result_json, tariff_version = excluded.tariff_version,
+               created_at = excluded.created_at""",
         (order_id, plan_id, json.dumps(inputs), json.dumps(result), result["tariff_version"], now_iso()),
     )
     return get_shipping_quote(db, order_id)  # type: ignore[return-value]
 
 
-def latest_plan(db: sqlite3.Connection, order_id: int) -> dict[str, Any] | None:
+def latest_plan(db: Database, order_id: int) -> dict[str, Any] | None:
     row = db.execute(
         "SELECT * FROM packing_plans WHERE order_id = ? ORDER BY id DESC LIMIT 1",
         (order_id,),

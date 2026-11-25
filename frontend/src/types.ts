@@ -1,4 +1,51 @@
-export type Page = 'dashboard' | 'orders' | 'catalog' | 'clients' | 'order'
+export type Page = 'dashboard' | 'orders' | 'checklist' | 'export' | 'catalog' | 'clients' | 'users' | 'order'
+
+export type Role = 'admin' | 'user'
+
+export interface AuthConfig {
+  configured: boolean
+  publishable_key: string
+}
+
+/** The signed-in user as the backend sees it; the role always comes from the server. */
+export interface CurrentUser {
+  id: number
+  email: string
+  full_name: string
+  role: Role
+  is_admin: boolean
+}
+
+export interface AppUser {
+  id: number
+  email: string
+  full_name: string
+  role: Role
+  is_active: boolean
+  /** Has signed in at least once (linked to a Clerk account). */
+  linked: boolean
+  created_at: string
+  last_login_at: string | null
+}
+
+export interface NewUserInput {
+  email: string
+  full_name: string
+  role: Role
+  send_invitation: boolean
+}
+
+export interface NewUserResult {
+  user: AppUser
+  invitation: 'sent' | 'failed' | 'skipped'
+  invitation_error?: string
+}
+
+export interface UserUpdate {
+  full_name?: string
+  role?: Role
+  is_active?: boolean
+}
 
 export interface OrderSummary {
   id: number
@@ -103,6 +150,7 @@ export interface PackingResult {
   dhl_zone?: number
   dhl_zone_assumed?: boolean
   options?: PackingOption[]
+  settings?: { allowance_cm: number; gap_cm: number; use_capacities: boolean; allow_on_side: boolean; max_parcel_kg: number | null }
   status: string
   box_count: number
   unit_count: number
@@ -178,10 +226,12 @@ export interface Product {
   width_cm: number
   height_cm: number
   weight_kg: number
-  price_eur: number
   rotation_allowed: number
   fragile: number
   active: number
+  ean?: string
+  tsca_name?: string
+  tsca_description?: string
 }
 
 export interface BoxType {
@@ -193,6 +243,8 @@ export interface BoxType {
   height_cm: number
   empty_weight_kg: number
   max_weight_kg: number
+  reference_50ml: number | null
+  reference_250ml: number | null
   active: number
 }
 
@@ -332,3 +384,89 @@ export interface SavedShippingQuote {
 }
 
 export interface ShippingQuoteResponse { quote: SavedShippingQuote | null; stale: boolean; detected_destination: DetectedDestination | null }
+
+export type TscaCertification = '' | 'positive' | 'negative'
+
+export interface TscaItem {
+  product_id: number | null
+  number: string
+  name: string
+  description: string
+}
+
+export interface TscaDraft {
+  date: string
+  reference: string
+  certification: TscaCertification
+  items: TscaItem[]
+}
+
+export interface TscaState {
+  eligible: boolean
+  destination: { code: string; name: string } | null
+  saved: boolean
+  confirmed: boolean
+  updated_at: string | null
+  draft: TscaDraft
+  issues: string[]
+}
+
+export type ShipmentDocField = 'doc_pl' | 'doc_sds' | 'doc_stripe' | 'doc_tsca' | 'doc_sec232' | 'doc_coo'
+export type ShipmentEmailField = 'email_client_sent' | 'email_forwarder_sent'
+
+/** One outgoing shipment (a row of the Export tracking sheet). Document checks: null = not applicable. */
+export interface Shipment {
+  id: number
+  ship_date: string
+  order_id: number | null
+  order_number: string | null
+  client: string
+  po: string
+  destination: string
+  invoice_number: string
+  tracking_number: string
+  forwarder: string
+  doc_pl: boolean | null
+  doc_sds: boolean | null
+  doc_stripe: boolean | null
+  doc_tsca: boolean | null
+  doc_sec232: boolean | null
+  doc_coo: boolean | null
+  email_client_sent: boolean
+  email_client_sent_at: string | null
+  email_forwarder_sent: boolean
+  email_forwarder_sent_at: string | null
+  notes: string
+  created_by: string
+  created_at: string
+  updated_at: string
+  progress: { done: number; total: number }
+  complete: boolean
+  requirements: OrderRequirementsNote | null
+}
+
+export interface ShipmentInput {
+  ship_date: string
+  order_id?: number | null
+  client?: string
+  po?: string
+  destination?: string
+  invoice_number?: string
+  tracking_number?: string
+  forwarder?: string
+  notes?: string
+}
+
+export type ShipmentUpdate = Partial<Omit<ShipmentInput, 'order_id'>> & Partial<Record<ShipmentDocField, boolean | null>> & Partial<Record<ShipmentEmailField, boolean>>
+
+export interface ShipmentOrderCandidate { id: number; order_number: string; client: string; order_date: string | null; status: string }
+
+export interface ShipmentOrderDefaults {
+  order_id: number
+  client: string
+  po: string
+  destination: string
+  forwarder: string
+}
+
+export interface ShipmentFilters { from?: string; to?: string; q?: string; forwarder?: string; destination?: string; pending?: boolean }

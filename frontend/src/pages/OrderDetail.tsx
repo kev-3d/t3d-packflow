@@ -15,6 +15,7 @@ import { DHL_PANEL_ID, DhlShippingPanel, type DhlRateStatus } from '../component
 import { colorForProduct } from '../components/box3d/sceneBuilder'
 import { ReviewProductsTable } from '../components/ReviewProductsTable'
 import { PackingObjectives } from '../components/PackingObjectives'
+import { TscaDialog } from '../components/TscaDialog'
 import { fieldId, makeDraft, reviewPayload, serverIssues, validateReview, type DraftItem, type ReviewIssue } from '../review'
 import type { AnalysisReport, OrderDetailData, OrderItem, PackingObjective, PackingResult, Product } from '../types'
 
@@ -37,6 +38,9 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
   const [previewError, setPreviewError] = useState('')
   const [undo, setUndo] = useState<{ id: number; quantity: number; planId: number } | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
+  const [tscaOpen, setTscaOpen] = useState(false)
+  // TSCA certification is offered only for shipments to the United States.
+  const [tscaDestination, setTscaDestination] = useState<{ eligible: boolean; name?: string }>({ eligible: false })
   const [highlightedProduct, setHighlightedProduct] = useState('')
   const exportMenuRef = useRef<HTMLDivElement>(null)
   const [dhlRate, setDhlRate] = useState<DhlRateStatus>({ state: 'loading' })
@@ -62,6 +66,13 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
     document.addEventListener('keydown', onKeyDown)
     return () => { document.removeEventListener('mousedown', onPointerDown); document.removeEventListener('keydown', onKeyDown) }
   }, [exportOpen])
+  useEffect(() => {
+    // Re-checked when the DHL destination changes, since a saved quote sets the destination.
+    let cancelled = false
+    api.tsca(order.id).then(state => { if (!cancelled) setTscaDestination({ eligible: state.eligible, name: state.destination?.name }) })
+      .catch(() => { if (!cancelled) setTscaDestination({ eligible: false }) })
+    return () => { cancelled = true }
+  }, [order.id, dhlRate.destination])
   useEffect(() => {
     let cancelled = false
     api.products().then(products => { if (!cancelled) { setCatalog(products); setCatalogError(false) } })
@@ -130,6 +141,18 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
     } catch (error) {
       notify(error instanceof Error ? error.message : 'The packing plan could not be recalculated.', true)
     } finally { setBusy(false); setPendingObjective(undefined); setOperation('') }
+  }
+
+  const changeAllowance = async (allowanceCm: number) => {
+    setBusy(true); setOperation('Recalculating the packing plan with the new wall clearance…')
+    try {
+      await api.analyzeOrder(order.id, undefined, allowanceCm)
+      await onRefresh()
+      setBoxIndex(0)
+      notify(`Packing plan recalculated with ${allowanceCm} cm wall clearance.`)
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'The packing plan could not be recalculated.', true)
+    } finally { setBusy(false); setOperation('') }
   }
 
   const saveAndFinish = async () => {
@@ -235,6 +258,7 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
 
   return (
     <div className="page order-detail-pag">
+      {tscaOpen && tscaDestination.eligible && <TscaDialog orderId={order.id} orderNumber={order.order_number} notify={notify} onClose={() => setTscaOpen(false)} />}
       {preview && <RecommendationPreview preview={preview} currency={order.currency} busy={busy} error={previewError} onClose={() => setPreview(null)} onApply={applyPreview} />}
       <header className="detail-header">
         <button className="back-button" onClick={onBack}><ArrowLeft size={18} /> Orders</button>
@@ -248,6 +272,7 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
               <button type="button" role="menuitem" onClick={() => { setExportOpen(false); exportExcel() }}><span>Excel</span><small>Editable workbook</small></button>
               <button type="button" role="menuitem" disabled={result?.status !== 'complete'} onClick={() => { setExportOpen(false); exportShippingDoc('packing-list') }}><span>Packing list</span><small>Shipment document (PDF)</small></button>
               <button type="button" role="menuitem" disabled={result?.status !== 'complete'} onClick={() => { setExportOpen(false); exportShippingDoc('labels') }}><span>Box labels</span><small>One 10×10 cm label per box (PDF)</small></button>
+              <button type="button" role="menuitem" disabled={!tscaDestination.eligible} title={tscaDestination.eligible ? undefined : 'Only for shipments to the United States'} onClick={() => { setExportOpen(false); setTscaOpen(true) }}><span>TSCA certification</span><small>{tscaDestination.eligible ? 'US customs declaration (PDF)' : `Only for US shipments${tscaDestination.name ? ` · this order ships to ${tscaDestination.name}` : ''}`}</small></button>
             </div>}
           </div>}
           {order.plan && !editing && <Button className="button button--accent" disabled={busy || result?.status !== 'complete'} onClick={saveAndFinish}>{savingPlan ? <LoaderCircle className="spin" size={17} /> : <Save size={17} />}{savingPlan ? 'Saving…' : 'Save & Finish'}</Button>}
@@ -322,7 +347,7 @@ export function OrderDetail({ order, onBack, onRefresh, onSaved, notify }: Detai
             </article>
 
           </section>
-          {result.options?.length ? <PackingObjectives options={result.options} zone={result.dhl_zone ?? 1} zoneAssumed={result.dhl_zone_assumed ?? true} busy={busy} pending={pendingObjective} onSelect={changeObjective} /> : null}
+          {result.options?.length ? <PackingObjectives options={result.options} zone={result.dhl_zone ?? 1} zoneAssumed={result.dhl_zone_assumed ?? true} busy={busy} pending={pendingObjective} onSelect={changeObjective} allowanceCm={result.settings?.allowance_cm ?? 0.5} onAllowanceChange={changeAllowance} /> : null}
           <section id="selected-box-details" className="packing-workbench pb-3" aria-labelledby={`select-box-${selectedBox.sequence}`}>
             <article className="panel box-selector-panel">
               <div className="box-switcher box-switcher--cards"><BoxNavigation boxes={result.boxes} selectedIndex={selectedIndex} onSelect={index => { setBoxIndex(index); setHighlightedProduct('') }} /></div>

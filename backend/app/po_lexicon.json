@@ -1,0 +1,156 @@
+{
+  "_readme": [
+    "Vocabulary used to read purchase-order PDFs. Edit this file to support a new supplier wording; no code change is needed.",
+    "Labels and column names are compared without case, accents or punctuation, word by word, and the longest synonym wins:",
+    "'Total qty' is a quantity total, not the order total; 'Date de la demande' is a requested date, not the order date.",
+    "company_suffixes and currencies are compared exactly as written (case-sensitive), so 'kg' never looks like 'KG'.",
+    "After editing, run: python -m unittest discover -s tests -p test_extraction.py"
+  ],
+
+  "own_company": {
+    "name": "Thought3D Ltd",
+    "aliases": ["Thought3D", "Thought 3D", "Thought3D Ltd", "Thought3D Limited"]
+  },
+
+  "labels": {
+    "order_number": [
+      "Order No", "Order No.", "Order Number", "Order Nr", "Order #", "Order ID", "Order Ref", "Order Reference",
+      "Our order ID", "Our order no", "Our ref", "Our reference",
+      "PO", "PO #", "PO No", "PO Number", "PO Nr", "PO Ref", "P.O.", "P.O. #", "P.O. No", "P.O. Number",
+      "Purchase Order", "Purchase Order #", "Purchase Order No", "Purchase Order Number", "Purchase order ID",
+      "#",
+      "Bon de commande", "Bon de commande #", "Commande", "Commande N°", "N° de commande", "Numéro de commande",
+      "Pedido", "Pedido N°", "Número de pedido", "Nº de pedido", "Orden de compra", "Orden de compra N°",
+      "Bestellnummer", "Bestellung", "Bestellung Nr", "Ordine", "Numero ordine"
+    ],
+    "order_date": [
+      "Date", "Order Date", "PO Date", "P.O. Date", "Date of order", "Issue Date", "Date Issued", "Issued", "Reorder date",
+      "Date de la commande", "Date de commande",
+      "Fecha", "Fecha del pedido", "Fecha de pedido", "Fecha de emisión",
+      "Datum", "Bestelldatum", "Data", "Data ordine"
+    ],
+    "requested_date": [
+      "Delivery Date", "Requested Date", "Required Date", "Required By", "Request Date", "Due Date", "Ship Date",
+      "Ship By", "Expected Date", "Expected Delivery", "Need By", "Deliver By",
+      "Date de la demande", "Date de livraison", "Date prévue",
+      "Fecha de entrega", "Fecha requerida", "Liefertermin", "Lieferdatum", "Data di consegna"
+    ],
+    "client": [
+      "Customer", "Customer Name", "Client", "Company", "Sold To", "Sold-To", "Cliente", "Kunde"
+    ],
+    "billing_address": [
+      "Bill To", "Bill-To", "Billed To", "Bill To Address", "Billing Address", "Invoice To", "Invoice Address",
+      "Facturer à", "Adresse de facturation", "Facturar a", "Dirección de facturación", "Rechnungsadresse"
+    ],
+    "delivery_address": [
+      "Delivery Address", "Shipping Address", "Ship To", "Ship-To", "Ship To Address", "Deliver To", "Delivery To",
+      "Adresse de livraison", "Adresse d'expédition", "Lieu de livraison", "Dirección de entrega",
+      "Dirección de envío", "Lieferadresse", "Lieferanschrift"
+    ],
+    "vendor": [
+      "Vendor", "Vendor Address", "Supplier", "Supplier Address", "Fournisseur", "Proveedor", "Lieferant", "Fornitore"
+    ],
+    "terms": [
+      "Terms", "Payment Terms", "Terms of Payment", "Payment", "Conditions de paiement", "Conditions de règlement",
+      "Condiciones de pago", "Términos de pago", "Forma de pago", "Zahlungsbedingungen", "Termini di pagamento"
+    ],
+    "notes": [
+      "Notes", "Note", "Remarks", "Comments", "Special Instructions", "Instructions",
+      "Remarques", "Observations", "Observaciones", "Notas", "Bemerkungen", "Hinweise", "Note aggiuntive"
+    ],
+    "subtotal": [
+      "Sub Total", "Subtotal", "Sub-Total", "Total Net", "Net Total", "Net Amount", "Total before tax", "Total excl. VAT",
+      "Total excl VAT", "Total excluding tax", "Goods Total", "Merchandise Total", "Items Total",
+      "Montant HT", "Total HT", "Sous-total", "Importe neto", "Base imponible", "Subtotal sin IVA",
+      "Zwischensumme", "Nettobetrag", "Summe netto", "Netto", "Imponibile"
+    ],
+    "tax": [
+      "Tax", "Taxes", "Sales Tax", "VAT", "GST", "HST", "TVA", "IVA", "MwSt", "USt", "Impuestos", "Impuesto"
+    ],
+    "total": [
+      "Total", "Grand Total", "Total Amount", "Total Due", "Amount Due", "Balance Due", "Order Total", "PO Total",
+      "Total incl. VAT", "Total TTC", "Montant TTC", "Total a pagar", "Importe total", "Gesamtbetrag", "Gesamtsumme",
+      "Totale"
+    ],
+    "quantity_total": [
+      "Total qty", "Total quantity", "Total units", "Total items", "Total pieces", "Total pcs", "Total weight",
+      "Qty total", "Quantité totale", "Cantidad total", "Gesamtmenge"
+    ]
+  },
+
+  "columns": {
+    "position": ["Pos", "Position", "Line", "Ln", "#", "N°", "No"],
+    "sku": [
+      "Item", "Item Code", "Item #", "Item No", "SKU", "Product Code", "Part Number", "Part No", "Part #", "Code",
+      "Reference", "Ref", "Référence", "Our Item", "Our Item ID", "Supplier Item ID", "Vendor Item", "Manufacturer",
+      "Manufacturer No", "Mfr Part", "Artikelnummer", "Art Nr", "Código", "Referencia"
+    ],
+    "ean": ["EAN", "UPC", "GTIN", "Barcode"],
+    "description": [
+      "Description", "Item & Description", "Item Description", "Product", "Product Name", "Product Description",
+      "Désignation", "Descripción", "Producto", "Artículo", "Bezeichnung", "Beschreibung", "Article", "Descrizione"
+    ],
+    "quantity": [
+      "Qty", "Quantity", "Qty Ordered", "Order Qty", "Ordered", "Units", "Pcs", "Qté", "Quantité", "Cantidad", "Cant",
+      "Menge", "Anzahl", "Quantità"
+    ],
+    "unit_price": [
+      "Price", "Unit Price", "Rate", "Unit Cost", "Cost", "Purchase Price", "Unit EUR", "Unit USD", "Unit GBP",
+      "Prix", "Prix unitaire", "Precio", "Precio unitario", "Preis", "Einzelpreis", "Prezzo"
+    ],
+    "amount": [
+      "Amount", "Total", "Line Total", "Extended", "Ext Price", "Extended Price", "Net Amount", "Montant", "Importe",
+      "Betrag", "Gesamtpreis", "Importo", "Value", "Line Value"
+    ],
+    "discount": ["Discount", "Disc", "Disc %", "Rem", "Rem. (%)", "Remise", "Descuento", "Dto", "Rabatt", "Sconto"],
+    "tax": ["Tax", "Taxes", "VAT", "TVA", "IVA", "MwSt"],
+    "date": [
+      "Date de la demande", "Delivery Date", "Due Date", "Required Date", "Ship Date", "Fecha de entrega", "Liefertermin"
+    ]
+  },
+
+  "company_suffixes": [
+    "GmbH", "GMBH", "mbH", "AG", "KG", "UG", "Ltd", "Ltd.", "LTD", "LTD.", "Limited", "LIMITED", "LLC", "L.L.C.",
+    "Inc", "Inc.", "INC", "INC.", "Incorporated", "Corp", "Corp.", "CORP", "Corporation", "PLC", "plc", "LLP",
+    "Pty", "AB", "A/S", "ApS", "Oy", "Oyj", "B.V.", "BV", "N.V.", "NV", "S.A.", "S.L.", "S.L.U.", "SAS", "S.A.S.",
+    "SARL", "S.A.R.L.", "SRL", "S.R.L.", "S.r.l.", "Srl", "SpA", "S.p.A.", "s.r.o.", "Kft", "Kft.", "Sp.", "S.C."
+  ],
+
+  "client_exclude": [
+    "address", "adresse", "invoice", "delivery", "deliver", "expedition", "vendor", "supplier", "buyer", "contact",
+    "purchase order", "bon de commande", "terms", "payment", "ein", "vat", "tva", "date", "phone", "tel", "fax",
+    "email", "e-mail", "www", "page", "please"
+  ],
+
+  "document_titles": [
+    "Purchase Order", "Purchase Order Purchase Order", "PO", "Order", "Bon de commande", "Commande", "Pedido",
+    "Orden de compra", "Bestellung", "Ordine", "Ordine di acquisto"
+  ],
+
+  "measure_units": ["ml", "l", "cl", "dl", "g", "kg", "mg", "cm", "mm", "m", "oz", "lb", "lbs", "in", "gal", "x"],
+
+  "quantity_units": ["units", "unit", "unites", "unite", "pcs", "pc", "pieces", "piece", "ea", "each", "uds", "unidades", "stk", "stuck"],
+
+  "currencies": {
+    "EUR": ["€", "EUR"],
+    "GBP": ["£", "GBP"],
+    "USD": ["US$", "$", "USD"],
+    "SEK": ["SEK"], "NOK": ["NOK"], "DKK": ["DKK"], "CHF": ["CHF"], "PLN": ["PLN"], "CZK": ["CZK"],
+    "HUF": ["HUF"], "CAD": ["CAD"], "AUD": ["AUD"], "NZD": ["NZD"], "JPY": ["JPY"], "CNY": ["CNY"]
+  },
+
+  "months": {
+    "1": ["jan", "january", "janvier", "janv", "enero", "ene", "januar", "gennaio", "gen"],
+    "2": ["feb", "february", "fevrier", "fev", "febrero", "februar", "febbraio"],
+    "3": ["mar", "march", "mars", "marzo", "marz", "maerz"],
+    "4": ["apr", "april", "avril", "avr", "abril", "abr", "aprile"],
+    "5": ["may", "mai", "mayo", "maggio", "mag"],
+    "6": ["jun", "june", "juin", "junio", "juni", "giugno", "giu"],
+    "7": ["jul", "july", "juillet", "juil", "julio", "juli", "luglio", "lug"],
+    "8": ["aug", "august", "aout", "agosto", "ago"],
+    "9": ["sep", "sept", "september", "septembre", "septiembre", "settembre", "set"],
+    "10": ["oct", "october", "octobre", "octubre", "oktober", "okt", "ottobre", "ott"],
+    "11": ["nov", "november", "novembre", "noviembre"],
+    "12": ["dec", "december", "decembre", "diciembre", "dic", "dezember", "dez", "dicembre"]
+  }
+}

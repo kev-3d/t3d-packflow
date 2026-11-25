@@ -8,11 +8,16 @@ import { UploadModal } from './components/UploadModal'
 import { Catalog } from './pages/Catalog'
 import { Clients } from './pages/Clients'
 import { Dashboard } from './pages/Dashboard'
+import { Export } from './pages/Export'
 import { OrderDetail } from './pages/OrderDetail'
 import { Orders } from './pages/Orders'
+import { ShipmentChecklist } from './pages/ShipmentChecklist'
+import { Users } from './pages/Users'
+import { useCurrentUser } from './auth'
 import type { AnalysisReport, BoxType, DashboardData, OrderDetailData, OrderSummary, Page, Product } from './types'
 
 function App() {
+  const { is_admin: isAdmin } = useCurrentUser()
   const [page, setPage] = useState<Page>('dashboard')
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [orders, setOrders] = useState<OrderSummary[]>([])
@@ -139,10 +144,13 @@ function App() {
       ) : (
         <>
           {page === 'dashboard' && !dashboard && connectionError && <div className="connection-error"><AlertCircle size={36} /><h1>We could not load your workspace</h1><p>Check that the server is available and try again.</p><Button className="button button--accent" onClick={() => window.location.reload()}>Try again</Button></div>}
-          {page === 'dashboard' && dashboard && <Dashboard onViewOrders={() => navigate('orders')} data={dashboard} onOpenOrder={openOrder} onUpload={() => setUploadOpen(true)} />}
+          {page === 'dashboard' && dashboard && <Dashboard onViewOrders={() => navigate('orders')} onOpenChecklist={() => navigate('checklist')} data={dashboard} onOpenOrder={openOrder} onUpload={() => setUploadOpen(true)} />}
           {page === 'orders' && <Orders orders={orders} onDeleteAll={showDeleteOrders} onDelete={showDeleteOrder} onOpen={openOrder} />}
+          {page === 'checklist' && <ShipmentChecklist notify={notify} />}
+          {page === 'export' && <Export notify={notify} onOpenOrder={openOrder} />}
           {page === 'catalog' && <Catalog products={products} boxes={boxes} onRefresh={loadCatalog} notify={notify} />}
           {page === 'clients' && <Clients notify={notify} />}
+          {page === 'users' && isAdmin && <Users notify={notify} />}
           {page === 'order' && order && <OrderDetail order={order} onBack={() => setPage('orders')} onRefresh={refreshCurrentOrder} onSaved={finishPackingPlan} notify={notify} />}
         </>
       )}

@@ -4,21 +4,116 @@
     {
       "name": "api",
       "runtimeExecutable": "backend/venv/Scripts/python.exe",
-      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--port", "8001", "--app-dir", "backend"],
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "app.main:app",
+        "--port",
+        "8001",
+        "--app-dir",
+        "backend"
+      ],
       "port": 8001
+    },
+    {
+      "name": "api-alt",
+      "runtimeExecutable": "backend/venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "app.main:app",
+        "--port",
+        "8003",
+        "--app-dir",
+        "backend"
+      ],
+      "env": {
+        "CLERK_AUTHORIZED_PARTIES": "http://localhost:5175"
+      },
+      "port": 8003
     },
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "frontend",
+        "run",
+        "dev"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "web-5173-alt-api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "frontend",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5173",
+        "--strictPort"
+      ],
+      "env": {
+        "PACKFLOW_API_PROXY": "http://127.0.0.1:8003"
+      },
       "port": 5173
     },
     {
       "name": "web-alt-api",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--port", "5175"],
-      "env": { "PACKFLOW_API_PROXY": "http://127.0.0.1:8003" },
+      "runtimeArgs": [
+        "--prefix",
+        "frontend",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5175"
+      ],
+      "env": {
+        "PACKFLOW_API_PROXY": "http://127.0.0.1:8003"
+      },
       "port": 5175
+    },
+    {
+      "name": "api-export",
+      "runtimeExecutable": "backend/venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "app.main:app",
+        "--port",
+        "8005",
+        "--app-dir",
+        "backend"
+      ],
+      "env": {
+        "CLERK_AUTHORIZED_PARTIES": "http://localhost:5176"
+      },
+      "port": 8005,
+      "autoPort": false
+    },
+    {
+      "name": "web-export",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "frontend",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5176",
+        "--strictPort"
+      ],
+      "env": {
+        "PACKFLOW_API_PROXY": "http://127.0.0.1:8005"
+      },
+      "port": 5176,
+      "autoPort": false
     }
   ]
 }

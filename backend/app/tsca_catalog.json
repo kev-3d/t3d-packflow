@@ -1,0 +1,24 @@
+{
+  "source": "Thought3D 2026 reseller price list (EAN and product codes), as bundled in the TSCA declarations app.",
+  "products": [
+    {"ean": "5356660999303", "code": "MO2016", "tsca_name": "Magigoo Original 50 ml", "aliases": ["magigoo original", "magigoo original 50ml", "original 50ml"]},
+    {"ean": "5350583000207", "code": "MS2025", "tsca_name": "Magigoo Supergrip 50 ml", "aliases": ["magigoo supergrip", "magigoo supergrip 50ml", "supergrip 50ml"]},
+    {"ean": "5350583999921", "code": "MPP2018", "tsca_name": "Magigoo PP 50 ml", "tsca_description": "Water based adhesive to stick and release first layer of polypropylene plastic to a heated bed of FFF 3D Printer. Non flammable", "aliases": ["magigoo pp", "magigoo pro pp", "magigoo pp 50ml", "pp 50ml"]},
+    {"ean": "5350583999945", "code": "MPC2018", "tsca_name": "Magigoo PC 50 ml", "aliases": ["magigoo pc", "magigoo pro pc", "magigoo pc 50ml", "pc 50ml"]},
+    {"ean": "5350583999976", "code": "MPPGF2019", "tsca_name": "Magigoo PPGF 50 ml", "aliases": ["magigoo ppgf", "magigoo pro ppgf", "magigoo ppgf 50ml", "ppgf 50ml"]},
+    {"ean": "5350583999969", "code": "MPA2019", "tsca_name": "Magigoo PA 50 ml", "aliases": ["magigoo pa", "magigoo pro pa", "magigoo pa 50ml", "pa 50ml"]},
+    {"ean": "5350583999983", "code": "MF2019", "tsca_name": "Magigoo Flex 50 ml", "aliases": ["magigoo flex", "magigoo pro flex", "magigoo flex 50ml", "flex 50ml"]},
+    {"ean": "5350583999990", "code": "MHT2019", "tsca_name": "Magigoo HT 50 ml", "aliases": ["magigoo ht", "magigoo pro ht", "magigoo ht 50ml", "ht 50ml"]},
+    {"ean": "5350583999808", "code": "MM2019", "tsca_name": "Magigoo Metal 50 ml", "aliases": ["magigoo metal", "magigoo pro metal", "magigoo metal 50ml", "metal 50ml"]},
+    {"ean": "5350583000177", "code": "MGO2025", "tsca_name": "Magigoo Glide Original 250 ml", "aliases": ["magigoo original glide 250ml", "magigoo glide original 250ml", "magigoo glide original", "glide original 250ml"]},
+    {"ean": "5350583000221", "code": "MGS2025", "tsca_name": "Magigoo Glide Supergrip 250 ml", "aliases": ["magigoo supergrip glide 250ml", "magigoo glide supergrip 250ml", "magigoo glide supergrip", "glide supergrip 250ml"]},
+    {"ean": "5350583000238", "code": "MGPA2025", "tsca_name": "Magigoo Glide PA 250 ml", "aliases": ["magigoo pa glide 250ml", "magigoo glide pa 250ml", "magigoo glide pa", "glide pa 250ml"]},
+    {"ean": "5350583000245", "code": "MGPC2025", "tsca_name": "Magigoo Glide PC 250 ml", "aliases": ["magigoo pc glide 250ml", "magigoo glide pc 250ml", "magigoo glide pc", "glide pc 250ml"]},
+    {"ean": "5350583000252", "code": "MGPP2025", "tsca_name": "Magigoo Glide PP 250 ml", "aliases": ["magigoo pp glide 250ml", "magigoo glide pp 250ml", "magigoo glide pp", "glide pp 250ml"]},
+    {"ean": "5350583000214", "code": "MGHT2025", "tsca_name": "Magigoo Glide HT 250 ml", "aliases": ["magigoo ht glide 250ml", "magigoo glide ht 250ml", "magigoo glide ht", "glide ht 250ml"]},
+    {"ean": "5350583000191", "code": "MGK2025", "tsca_name": "Magigoo Glide Kit Original", "aliases": ["magigoo glide kit original", "magigoo glide kit", "glide kit original", "glide kit"]},
+    {"ean": "5350583000337", "code": "MGK2025-SG", "tsca_name": "Magigoo Glide Kit Supergrip", "aliases": ["magigoo glide kit supergrip", "glide kit supergrip"]},
+    {"ean": "5350583999952", "code": "MKIT2018", "tsca_name": "Magigoo PRO Kit", "aliases": ["magigoo pro kit", "pro kit", "prokit"]},
+    {"ean": "5350583000184", "code": "MGR2025", "tsca_name": "Magigoo Glide Roller", "aliases": ["magigoo glide roller", "glide roller"]}
+  ]
+}

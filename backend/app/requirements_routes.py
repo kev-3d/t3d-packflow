@@ -1,13 +1,13 @@
 """API for special client requirements (docs, courier, pricing and comments the packer must follow)."""
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from .database import connect, now_iso
+from .auth import require_admin
+from .database import Database, IntegrityError, connect, now_iso
 from .requirements import (
     REQUIREMENT_TEXT_FIELDS, Prepared, best_match, company_name_variants, name_key,
     parse_requirements_excel, prepare,
@@ -32,7 +32,7 @@ def _requirement_names(row: dict[str, Any], linked_customer: str | None) -> list
     return names
 
 
-def _load_requirements(db: sqlite3.Connection) -> list[dict[str, Any]]:
+def _load_requirements(db: Database) -> list[dict[str, Any]]:
     rows = db.execute(
         """SELECT r.*, c.customer AS client_name
            FROM client_requirements r LEFT JOIN clients c ON c.id = r.client_id
@@ -41,7 +41,7 @@ def _load_requirements(db: sqlite3.Connection) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def requirements_note_for(db: sqlite3.Connection, client_name: str | None) -> dict[str, Any] | None:
+def requirements_note_for(db: Database, client_name: str | None) -> dict[str, Any] | None:
     """Packing note for an order's customer: exact match on name, alias or linked client, else a suggestion."""
     if not client_name or not name_key(client_name):
         return None
@@ -70,7 +70,7 @@ def requirements_note_for(db: sqlite3.Connection, client_name: str | None) -> di
 Clients = list[tuple[int, Prepared, str]]
 
 
-def _client_candidates(db: sqlite3.Connection) -> Clients:
+def _client_candidates(db: Database) -> Clients:
     return [(row["id"], prepare(row["customer"]), row["customer"]) for row in db.execute("SELECT id, customer FROM clients")]
 
 
@@ -94,7 +94,7 @@ def _public(row: dict[str, Any], clients: Clients) -> dict[str, Any]:
     return public
 
 
-def _fetch_public(db: sqlite3.Connection, requirement_id: int) -> dict[str, Any]:
+def _fetch_public(db: Database, requirement_id: int) -> dict[str, Any]:
     row = db.execute(
         """SELECT r.*, c.customer AS client_name FROM client_requirements r
            LEFT JOIN clients c ON c.id = r.client_id WHERE r.id = ?""", (requirement_id,)).fetchone()
@@ -110,7 +110,7 @@ def list_client_requirements() -> list[dict[str, Any]]:
         return [_public(row, clients) for row in _load_requirements(db)]
 
 
-@router.post("/api/client-requirements/import")
+@router.post("/api/client-requirements/import", dependencies=[Depends(require_admin)])
 async def import_client_requirements(file: UploadFile = File(...)) -> dict[str, Any]:
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm")):
         raise HTTPException(400, "Upload an Excel .xlsx file.")
@@ -134,12 +134,13 @@ async def import_client_requirements(file: UploadFile = File(...)) -> dict[str, 
                 row_id, client_id, aliases = existing["id"], existing["client_id"], existing["aliases"]
                 updated += 1
             else:
-                cursor = db.execute(
+                row_id = db.insert_returning_id(
                     f"""INSERT INTO client_requirements (company, company_key, {_TEXT_COLUMNS}, created_at, updated_at)
-                        VALUES (?, ?, {', '.join('?' for _ in REQUIREMENT_TEXT_FIELDS)}, ?, ?)""",
+                        VALUES (?, ?, {', '.join('?' for _ in REQUIREMENT_TEXT_FIELDS)}, ?, ?)
+                        RETURNING id""",
                     (record["company"], key, *values, timestamp, timestamp),
                 )
-                row_id, client_id, aliases = cursor.lastrowid, None, ""
+                client_id, aliases = None, ""
                 created += 1
             if client_id is not None:
                 linked += 1
@@ -169,7 +170,7 @@ class ClientRequirementPayload(BaseModel):
     comments: str = Field(default="", max_length=4000)
 
 
-@router.patch("/api/client-requirements/{requirement_id}")
+@router.patch("/api/client-requirements/{requirement_id}", dependencies=[Depends(require_admin)])
 def update_client_requirement(requirement_id: int, payload: ClientRequirementPayload) -> dict[str, Any]:
     company = payload.company.strip()
     if not name_key(company):
@@ -186,12 +187,12 @@ def update_client_requirement(requirement_id: int, payload: ClientRequirementPay
                 (company, name_key(company), aliases, payload.client_id,
                  *(getattr(payload, field).strip() for field in REQUIREMENT_TEXT_FIELDS), now_iso(), requirement_id),
             )
-        except sqlite3.IntegrityError as exc:
+        except IntegrityError as exc:
             raise HTTPException(409, "Another requirement already uses this company name.") from exc
         return _fetch_public(db, requirement_id)
 
 
-@router.delete("/api/client-requirements")
+@router.delete("/api/client-requirements", dependencies=[Depends(require_admin)])
 def delete_all_client_requirements() -> dict[str, int]:
     with connect() as db:
         count = db.execute("SELECT COUNT(*) FROM client_requirements").fetchone()[0]
@@ -199,7 +200,7 @@ def delete_all_client_requirements() -> dict[str, int]:
     return {"deleted_requirements": count}
 
 
-@router.delete("/api/client-requirements/{requirement_id}")
+@router.delete("/api/client-requirements/{requirement_id}", dependencies=[Depends(require_admin)])
 def delete_client_requirement(requirement_id: int) -> dict[str, Any]:
     with connect() as db:
         row = db.execute("SELECT company FROM client_requirements WHERE id = ?", (requirement_id,)).fetchone()
